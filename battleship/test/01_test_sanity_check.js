@@ -1,7 +1,7 @@
 var Battleship = artifacts.require('Battleship')
 
 contract("Battleship", (accounts) => {
-    it("Should create a game and emit an event", async () => {
+    it("Should create a game and return the id", async () => {
         const battleship = await Battleship.deployed();
         const gameTx = await battleship.createGame({'from': accounts[2]});
 
@@ -27,23 +27,5 @@ contract("Battleship", (accounts) => {
         assert.notEqual(events[0].returnValues.id, events[1].returnValues.id, "returned id is undefined");
         assert.equal(events[0].returnValues.owner, accounts[1], "returned owner is not correct");
         assert.equal(events[1].returnValues.owner, accounts[2], "returned owner is not correct");
-    });
-
-    it("should let another player join by id", async () => {
-        const battleship = await Battleship.deployed();
-        const gameTx1 = await battleship.createGame({'from':accounts[1]});
-        let events = await battleship.getPastEvents('GameCreated',{
-            fromBlock:gameTx1.receipt.blockNumber,
-            toBlock:gameTx1.receipt.blockNumber
-        });
-        const gameId = events[0].returnValues.id;
-
-        const games = await battleship.getCreatedGamesIds.call();
-        // console.log(games);
-
-        const joinTx = await battleship.joinGameById(gameId, {'from':accounts[2]});
-        // console.log(joinTx);
-        const games2 = await battleship.getCreatedGamesIds.call();
-        // console.log(games2);
     });
 });

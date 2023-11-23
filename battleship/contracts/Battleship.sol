@@ -141,12 +141,7 @@ contract Battleship {
     ));
 
     // insert this game in the created games linked list
-    int256 oldHead = createdGamesHead;
-    createdGamesHead = int256(id);
-    games[id].nextCreated = oldHead;
-    if (oldHead >= 0) {
-      games[uint256(oldHead)].prevCreated = int256(id);
-    }
+    insertIntoCreatedGames(id);
 
     // emit the GameCreated event with the newly created game's id
     emit GameCreated(msg.sender, id);
@@ -198,7 +193,7 @@ contract Battleship {
     games[gameId].gamePhase = GamePhaseEnum.WAITING_PLAYER_1_GUESS;
     games[gameId].playerState1 = PlayerStateStruct(player2, "");
 
-    // TODO not really, go to waiting bet or something
+    // TODO not really, go to waiting committments or something
 
     emit GameReady(player2, gameId);
   }
