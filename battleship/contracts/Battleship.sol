@@ -46,9 +46,17 @@ contract Battleship {
 	int256 createdGamesHead = -1;
 	int256 createdGamesTail = -1;
 
+	// utils LUT for computing log2 of a power of 2
+	mapping(uint16 => uint16) log2LUT;
+
 	constructor() {
 		createdGamesHead = -1;
 		createdGamesTail = -1;
+
+		log2LUT[4] = 2;
+		log2LUT[16] = 4;
+		log2LUT[64] = 6;
+		log2LUT[256] = 8;
 	}
 
 	function insertIntoCreatedGames(uint256 id) private {
@@ -201,7 +209,7 @@ contract Battleship {
 		emit GameReady(player2, gameId);
 	}
 
-	function commitBoard(uint256 gameId, uint256 boardMerkleTreeRoot) public payable {
+	function commitBoard(uint256 gameId, bytes32 boardMerkleTreeRoot) public payable {
 		// check gameId
 		require(gameId < games.length, "Game does not exist");
 		require(games[gameId].gamePhase == GamePhaseEnum.WAITING_COMMITMENT, "This game is not expecting a commitment");
@@ -219,7 +227,7 @@ contract Battleship {
 				bothPlayersCommitted = true;
 			} 
 			games[gameId].playerState1.committedAmount = msg.value;
-			games[gameId].playerState1.committedBoardRoot = bytes32(boardMerkleTreeRoot);
+			games[gameId].playerState1.committedBoardRoot = boardMerkleTreeRoot;
 		} else if (msg.sender == games[gameId].playerState2.playerAddress) {
 			require(games[gameId].playerState2.committedAmount == 0, "Player already committed");
 			if (games[gameId].playerState1.committedAmount > 0) {
@@ -227,7 +235,7 @@ contract Battleship {
 				bothPlayersCommitted = true;
 			} 
 			games[gameId].playerState2.committedAmount = msg.value;
-			games[gameId].playerState2.committedBoardRoot = bytes32(boardMerkleTreeRoot);
+			games[gameId].playerState2.committedBoardRoot = boardMerkleTreeRoot;
 		}
 
 		if (bothPlayersCommitted) {
@@ -266,7 +274,33 @@ contract Battleship {
 		games[gameId].currentGuess.y = y;
 	}
 
-	function revealValue(uint256 gameId, uint16 x, uint16 y, uint256[] calldata merkleProof) public {
+	function computeMerkleRootFromProof(uint256 boardSize, uint16 position, bytes32 inputData, bytes32[] calldata merkleProof)
+			public view returns (bytes32) {
+		uint16 boardSizeLog = log2LUT[uint16(boardSize)];
+		require(boardSizeLog != 0, "Incorrect board size");
+		require(merkleProof.length == boardSizeLog, "Incorrect proof length");
+
+		bytes32 currHash = keccak256(abi.encodePacked(inputData));
+		bytes memory hashInput;
+		for(uint256 i=0; i < boardSizeLog; ++i) {
+			if (position % 2 == 0) {
+				hashInput = bytes.concat(
+					abi.encodePacked(currHash),
+					abi.encodePacked(merkleProof[i])
+				);
+			} else {
+				hashInput = bytes.concat(
+					abi.encodePacked(merkleProof[i]),
+					abi.encodePacked(currHash)
+				);
+			}
+			currHash = keccak256(hashInput);
+			position = position / 2; // rounds towards zero
+		}
+		return currHash;
+	}
+
+	function revealValue(uint256 gameId, uint16 x, uint16 y, bytes32[] calldata merkleProof) public {
 		// check gameId
 		// check sender is consistent with phase
 		// check coordinate bounds 
