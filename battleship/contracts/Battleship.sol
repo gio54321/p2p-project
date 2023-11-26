@@ -204,7 +204,7 @@ contract Battleship {
 		require(games[gameId].gamePhase == GamePhaseEnum.CREATED, "Game already started");
 
 		games[gameId].gamePhase = GamePhaseEnum.WAITING_COMMITMENT;
-		games[gameId].playerState1 = PlayerStateStruct(player2, "", 0);
+		games[gameId].playerState2 = PlayerStateStruct(player2, "", 0);
 
 		emit GameReady(player2, gameId);
 	}
@@ -213,7 +213,7 @@ contract Battleship {
 		// check gameId
 		require(gameId < games.length, "Game does not exist");
 		require(games[gameId].gamePhase == GamePhaseEnum.WAITING_COMMITMENT, "This game is not expecting a commitment");
-		require(msg.sender == games[gameId].playerState1.playerAddress || msg.sender == games[gameId].playerState1.playerAddress,
+		require(msg.sender == games[gameId].playerState1.playerAddress || msg.sender == games[gameId].playerState2.playerAddress,
 			"Only players of this game can commit");
 		
 		require(msg.value > 0, "You have to commit some wei to participate to the game");
@@ -322,8 +322,20 @@ contract Battleship {
 		// or there is an unresolved accusation for that game, initiated more than 5 blocks ago.
 	}
 
-	function getGamePhase(uint256 gameId) public view returns (GamePhaseEnum) {
+	function getGamePhase(uint256 gameId) public view returns (string memory) {
 		require(gameId < games.length, "Game does not exists");
-		return games[gameId].gamePhase;
+		GamePhaseEnum gamePhase = games[gameId].gamePhase;
+		if (gamePhase == GamePhaseEnum.CREATED) {
+			return "CREATED";
+		} else if (gamePhase == GamePhaseEnum.WAITING_COMMITMENT){
+			return "WAITING_COMMITMENT";
+		} else {
+			return "TODO"; //TODO
+		}
+	}
+
+	function getGamePlayers(uint256 gameId) public view returns (address, address) {
+		require(gameId < games.length, "Game does not exists");
+		return (games[gameId].playerState1.playerAddress, games[gameId].playerState2.playerAddress);
 	}
 }

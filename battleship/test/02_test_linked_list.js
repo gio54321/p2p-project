@@ -17,6 +17,19 @@ contract("Battleship", (accounts) => {
         assert.equal(games2.length, 0, "Game has not been removed");
     });
 
+    it("should store the correct player addresses", async () => {
+        const battleship = await Battleship.deployed();
+
+        const gameId = await utils.createGame(battleship, accounts[1]);
+
+        const games = await battleship.getCreatedGamesIds.call();
+        assert.equal(games.length, 1, "Game has not been created");
+        const joinTx = await battleship.joinGameById(gameId, {'from':accounts[2]});
+        const players = await battleship.getGamePlayers(gameId);
+        assert.equal(players['0'], accounts[1], "Player addresses not stored correctly");
+        assert.equal(players['1'], accounts[2], "Player addresses not stored correctly");
+    });
+
     it("should delete the first element", async () => {
         const battleship = await Battleship.deployed();
 
