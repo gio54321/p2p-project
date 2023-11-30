@@ -106,6 +106,11 @@ function computeMerkleProof(commitments, position) {
     return computeMerkleProofRecursive(commitments, position, 0, commitments.length)[1];
 }
 
+function computeMerkleProofFromValues(boardValues, position) {
+    const commitments = boardValues.map(generateCommitment);
+    return computeMerkleProof(commitments, position);
+}
+
 
 exports.createGame = createGame;
 exports.setupTestGame = setupTestGame;
@@ -113,3 +118,4 @@ exports.generateCommitment = generateCommitment;
 exports.generateBoardValue = generateBoardValue;
 exports.computeMerkleRoot = computeMerkleRoot;
 exports.computeMerkleProof = computeMerkleProof;
+exports.computeMerkleProofFromValues = computeMerkleProofFromValues;

@@ -122,7 +122,7 @@ contract Battleship {
 
 		// create the game struct
 		games.push(GameStateStruct(
-			8, // TODO make this parametric?
+			16, // TODO make this parametric?
 			GamePhaseEnum.CREATED,
 			PlayerStateStruct(msg.sender, "", 0, 0),
 			PlayerStateStruct(address(0), "", 0, 0),
