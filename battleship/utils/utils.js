@@ -11,6 +11,20 @@ async function createGame(battleship, account) {
     return undefined;
 }
 
+async function setupTestGame(battleship, account1, account2, values1, values2) {
+    const commitment1 = values1.map(generateCommitment);
+    const commitment2 = values2.map(generateCommitment);
+    const root1 = computeMerkleRoot(commitment1);
+    const root2 = computeMerkleRoot(commitment2);
+
+    const gameId = await createGame(battleship, account1);
+    const joinTx = await battleship.joinGameById(gameId, {'from':account2});
+
+    const commit1Tx = await battleship.commitBoard(gameId, root1, {'from':account1, value:web3.utils.toWei("42", 'lovelace')});
+    const commit2Tx = await battleship.commitBoard(gameId, root2, {'from':account2, value:web3.utils.toWei("42", 'lovelace')});
+    return gameId;
+}
+
 /**
  * 
  * @param {number} value 
@@ -94,6 +108,7 @@ function computeMerkleProof(commitments, position) {
 
 
 exports.createGame = createGame;
+exports.setupTestGame = setupTestGame;
 exports.generateCommitment = generateCommitment;
 exports.generateBoardValue = generateBoardValue;
 exports.computeMerkleRoot = computeMerkleRoot;

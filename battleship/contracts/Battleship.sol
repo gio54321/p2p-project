@@ -9,6 +9,7 @@ enum GamePhaseEnum {
 	WAITING_PLAYER_2_VALUE,
 	WAITING_PLAYER_2_GUESS,
 	WAITING_PLAYER_1_VALUE,
+	WAITING_BOARD_REVEAL,
 	FINISHED
 }
 
@@ -21,117 +22,97 @@ struct PlayerStateStruct {
 	address playerAddress;
 	bytes32 committedBoardRoot;
 	uint256 committedAmount;
+	uint16 sunkShips;
 }
 
 struct GameStateStruct {
-	uint16 board_size;
+	uint16 boardSize;
 	GamePhaseEnum gamePhase;
 	PlayerStateStruct playerState1;
 	PlayerStateStruct playerState2;
 	CellGuessStruct currentGuess;
 
-	int256 prevCreated;
-	int256 nextCreated;
+	// 0 -> no winner (yet)
+	// 1 -> player 1
+	// 2 -> player 2
+	uint8 winner;
+
+	int256 createdPtr;
 }
 
 contract Battleship {
+	//TODO this is variable with board size
+	uint16 constant TOTAL_SHIPS_ON_BOARD = 6;
+
 	event GameCreated(address owner, uint256 id);
 	event GameReady(address player2, uint256 id);
 
 	// Array of all the games
 	GameStateStruct[] games;
 
-	// Indexes of the head and tail of the currently created games, used for O(1)
+	// Indexes of the currently created games, used for O(1)
 	// search of a random game
-	int256 createdGamesHead = -1;
-	int256 createdGamesTail = -1;
+	uint256[] createdGames;
+
+	// random counter
+	uint256 randomCounter;
 
 	// utils LUT for computing log2 of a power of 2
 	mapping(uint16 => uint16) log2LUT;
 
 	constructor() {
-		createdGamesHead = -1;
-		createdGamesTail = -1;
-
 		log2LUT[4] = 2;
 		log2LUT[16] = 4;
 		log2LUT[64] = 6;
 		log2LUT[256] = 8;
+
+		randomCounter = 0;
+	}
+
+	function getRandomValue(uint256 b) private returns (uint256) {
+		// returns a random value in the range [0, b)
+		// based on the previous block hash
+		// and the internal counter
+		// every time it is called the value will be different
+		//
+		// NOTE: this random generation can be biased for some choices of b
+		// because this function generates a uniform number in the range [0, 2^256-1]
+		// and then applies the modulo b operation.
+		// If for example b = 2^255 + 2^254 then the values in the range [0, 2^254-1] are
+		// twice as likely to be drawn w.r.t. the other values. For smaller choices of b, this effect
+		// is reduced and can be considered negligible.
+
+		bytes32 blockHash = blockhash(block.number-1);
+		randomCounter += 1;
+		uint256 randValue = uint256(keccak256(bytes.concat(
+					abi.encodePacked(blockHash),
+					abi.encodePacked(bytes32(randomCounter))
+				)));
+		return randValue % b;
 	}
 
 	function insertIntoCreatedGames(uint256 id) private {
-		// insert the game games[id] at the end of the linked list
-		// of created games
-
-		if (createdGamesHead < 0 && createdGamesTail < 0) {
-			// the linked list is currently empty, insert only this id
-			createdGamesHead = int256(id);
-			createdGamesTail = int256(id);
-			games[id].nextCreated = -1;
-			games[id].prevCreated = -1;
-		} else {
-			// insert at the end of the list
-			games[uint256(createdGamesTail)].nextCreated = int256(id);      
-			games[id].prevCreated = createdGamesTail;
-			createdGamesTail = int256(id);
-		}
-	}
-
-	function popFromCreatedGames() private returns (int256) {
-		// remove a node from the head of the created games list, if it is empty return -1
-		// else return the id of the removed node
-		
-		if (createdGamesHead < 0 && createdGamesTail < 0) {
-			return -1;
-		}
-
-		uint256 toRemoveId = uint256(createdGamesHead);
-		createdGamesHead = games[toRemoveId].nextCreated;
-
-		// clean up all fields in the removed node
-		games[toRemoveId].nextCreated = -1;
-		games[toRemoveId].prevCreated = -1;
-
-		// check if the list is empty, if it is clean also the tail pointer
-		if (createdGamesHead < 0) {
-			createdGamesHead = -1;
-			createdGamesTail = -1;
-		}
-
-		return int256(toRemoveId);
+		createdGames.push(id);
+		games[id].createdPtr = int256(createdGames.length - 1);
 	}
 
 	function removeFromCreatedGames(uint256 gameId) private {
-		// remove the game corresponding to gameId from the created games linked list
-		// ASSUMES: that the node is in the linked list
+		// remove the game corresponding to gameId from the created games set
+		require(games[gameId].createdPtr >= 0, "Game is not in the created games set");
+		uint256 createdIndex = uint256(games[gameId].createdPtr);
 
-		if (createdGamesHead == int256(gameId) && createdGamesTail == int256(gameId)) {
-			// the node is the only one in the list
-			createdGamesHead = -1;
-			createdGamesTail = -1;
+		if (createdIndex == createdGames.length - 1){
+			// this is the last element, just pop it
+			// this handles also the case where the length is 1
+			createdGames.pop();
 		} else {
-			// the node is in some position inside the list
-			if(games[gameId].nextCreated == -1) {
-				createdGamesTail = games[gameId].prevCreated;
-			} else {
-				games[uint256(games[gameId].nextCreated)].prevCreated = games[gameId].prevCreated;
-			}
-
-			if(games[gameId].prevCreated == -1) {
-				createdGamesHead = games[gameId].nextCreated;
-			} else {
-				games[uint256(games[gameId].prevCreated)].nextCreated = games[gameId].nextCreated;
-			}
-		}
-
-		// clean up all fields in the removed node
-		games[gameId].nextCreated = -1;
-		games[gameId].prevCreated = -1;
-
-		// check if the list is empty, if it is clean also the tail pointer
-		if (createdGamesHead < 0) {
-			createdGamesHead = -1;
-			createdGamesTail = -1;
+			// remove this element from the created games
+			// swap the last element with this position
+			// and update created pointer for that game
+			uint256 newElement = createdGames[createdGames.length - 1];
+			createdGames.pop();
+			createdGames[createdIndex] = newElement;
+			games[newElement].createdPtr = int256(createdIndex);
 		}
 	}
 
@@ -143,10 +124,10 @@ contract Battleship {
 		games.push(GameStateStruct(
 			8, // TODO make this parametric?
 			GamePhaseEnum.CREATED,
-			PlayerStateStruct(msg.sender, "", 0),
-			PlayerStateStruct(address(0), "", 0),
+			PlayerStateStruct(msg.sender, "", 0, 0),
+			PlayerStateStruct(address(0), "", 0, 0),
 			CellGuessStruct(0, 0),
-			-1,
+			0,
 			-1
 		));
 
@@ -158,33 +139,16 @@ contract Battleship {
 	}
 
 	function joinRandomGame() public {
-		int256 removedGameIndex = popFromCreatedGames();
-		require(removedGameIndex >= 0, "No games available to join");
+		require(createdGames.length > 0, "No currently available games");
+		uint256 idx = getRandomValue(createdGames.length);
+		uint256 gameId = createdGames[idx];
 
 		// join the game by that id
-		joinGamePlayer2ById(uint256(removedGameIndex), msg.sender);
+		joinGamePlayer2ById(gameId, msg.sender);
 	}
 
 	function getCreatedGamesIds() public view returns (uint256[] memory) {
-
-		// first calculate the length of the linked list
-		int256 cur = createdGamesHead;
-		uint256 createdGamesLen = 0;
-		while(cur >= 0) {
-			createdGamesLen += 1;
-			cur = games[uint256(cur)].nextCreated;
-		}
-		
-		// store the 
-		uint256[] memory result = new uint256[](createdGamesLen);
-		uint256 i = 0;
-		cur = createdGamesHead;
-		while(cur >= 0) {
-			result[i] = uint256(cur);
-			i += 1;
-			cur = games[uint256(cur)].nextCreated;
-		}
-		return result;
+		return createdGames;
 	}
 
 	function joinGameById(uint256 gameId) public {
@@ -192,19 +156,20 @@ contract Battleship {
 
 		// TODO if a game is deleted??!? I don't care ftm
 		require(games[gameId].gamePhase == GamePhaseEnum.CREATED, "Game already started");
-		removeFromCreatedGames(gameId);
 		joinGamePlayer2ById(gameId, msg.sender);
 	}
 
 	function joinGamePlayer2ById(uint256 gameId, address player2) private {
 		// make a player join a game
-		// it is assumed that the game has been already removed from the created games linked list
-
 		require(gameId < games.length, "Game with that id does not exists");
 		require(games[gameId].gamePhase == GamePhaseEnum.CREATED, "Game already started");
 
+		// first remove it from the createdGames set
+		removeFromCreatedGames(gameId);
+
+		// store second player information
 		games[gameId].gamePhase = GamePhaseEnum.WAITING_COMMITMENT;
-		games[gameId].playerState2 = PlayerStateStruct(player2, "", 0);
+		games[gameId].playerState2 = PlayerStateStruct(player2, "", 0, 0);
 
 		emit GameReady(player2, gameId);
 	}
@@ -255,8 +220,8 @@ contract Battleship {
 			"Operation not supported for the current game state");
 
 		// check coordinate bounds 
-		require(x < game.board_size, "x must be in the board's bounds");
-		require(y < game.board_size, "y must be in the board's bounds");
+		require(x < game.boardSize, "x must be in the board's bounds");
+		require(y < game.boardSize, "y must be in the board's bounds");
 
 		// check sender is consistent with phase
 		// and go to next state
@@ -300,16 +265,61 @@ contract Battleship {
 		return currHash;
 	}
 
-	function revealValue(uint256 gameId, uint16 x, uint16 y, bytes32[] calldata merkleProof) public {
+	function revealValue(uint256 gameId, uint16 x, uint16 y, bytes32 revealedValue, bytes32[] calldata merkleProof) public {
 		// check gameId
+		require(gameId < games.length, "Game does not exists");
+		GameStateStruct memory game = games[gameId];
+
+		require(
+			game.gamePhase == GamePhaseEnum.WAITING_PLAYER_1_VALUE || 
+			game.gamePhase == GamePhaseEnum.WAITING_PLAYER_2_VALUE,
+			"Operation not supported for the current game state");
+		
 		// check sender is consistent with phase
-		// check coordinate bounds 
-		// check provided coordinates are the ones requested
+		if (game.gamePhase == GamePhaseEnum.WAITING_PLAYER_1_VALUE) {
+			require(msg.sender == game.playerState1.playerAddress, "Only the correct player can reveal a value");
+		} else {
+			require(msg.sender == game.playerState2.playerAddress, "Only the correct player can reveal a value");
+		}
+
+		require(x == game.currentGuess.x, "x coordinate does not match guessed one");
+		require(y == game.currentGuess.y, "y coordinate does not match guessed one");
+
+		uint8 cellValue = uint8(uint256(revealedValue) % 256);
+		require(cellValue == 1 || cellValue == 0, "Board value can be only 0 or 1");
+
 		// check merkle proof
-		// check winning condition -> finished and pay amounts
-		// check legal board state (?) probably not
-		// check (?)
-		// go to WAITING_PLAYER_2_GUESS
+		bytes32 computedRoot = computeMerkleRootFromProof(game.boardSize,
+			y * game.boardSize + x,
+			revealedValue,
+			merkleProof);
+		
+		if (game.gamePhase == GamePhaseEnum.WAITING_PLAYER_1_VALUE) {
+			require(computedRoot == game.playerState1.committedBoardRoot, "Merkle proof is not correct");
+			if (cellValue == 1) {
+				game.playerState1.sunkShips += 1;
+			}
+			if (game.playerState1.sunkShips == TOTAL_SHIPS_ON_BOARD) {
+				game.winner = 2;
+				game.gamePhase = GamePhaseEnum.WAITING_BOARD_REVEAL;
+			} else {
+				game.gamePhase = GamePhaseEnum.WAITING_PLAYER_2_GUESS;
+			}
+		} else {
+			require(computedRoot == game.playerState2.committedBoardRoot, "Merkle proof is not correct");
+			if (cellValue == 1) {
+				game.playerState1.sunkShips += 1;
+			}
+			if (game.playerState2.sunkShips == TOTAL_SHIPS_ON_BOARD) {
+				game.winner = 1;
+				game.gamePhase = GamePhaseEnum.WAITING_BOARD_REVEAL;
+			} else {
+				game.gamePhase = GamePhaseEnum.WAITING_PLAYER_1_GUESS;
+			}
+		}
+
+		// TODO refactora sta cosa pls 
+		games[gameId] = game;
 	}
 
 	function accuseIdle(uint256 gameId) public {
@@ -329,8 +339,20 @@ contract Battleship {
 			return "CREATED";
 		} else if (gamePhase == GamePhaseEnum.WAITING_COMMITMENT){
 			return "WAITING_COMMITMENT";
+		} else if (gamePhase == GamePhaseEnum.WAITING_PLAYER_1_GUESS){
+			return "WAITING_PLAYER_1_GUESS";
+		} else if (gamePhase == GamePhaseEnum.WAITING_PLAYER_2_GUESS){
+			return "WAITING_PLAYER_2_GUESS";
+		} else if (gamePhase == GamePhaseEnum.WAITING_PLAYER_1_VALUE){
+			return "WAITING_PLAYER_1_VALUE";
+		} else if (gamePhase == GamePhaseEnum.WAITING_PLAYER_2_VALUE){
+			return "WAITING_PLAYER_2_VALUE";
+		} else if (gamePhase == GamePhaseEnum.WAITING_BOARD_REVEAL){
+			return "WAITING_BOARD_REVEAL";
+		} else if (gamePhase == GamePhaseEnum.FINISHED){
+			return "FINISHED";
 		} else {
-			return "TODO"; //TODO
+			return "";
 		}
 	}
 

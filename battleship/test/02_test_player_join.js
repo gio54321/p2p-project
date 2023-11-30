@@ -2,8 +2,6 @@ var Battleship = artifacts.require('Battleship');
 
 const utils = require('../utils/utils.js');
 
-// clean room environment to test created games linked list functionality
-
 contract("Battleship", (accounts) => {
     it("should let another player join by id", async () => {
         const battleship = await Battleship.deployed();
@@ -30,7 +28,7 @@ contract("Battleship", (accounts) => {
         assert.equal(players['1'], accounts[2], "Player addresses not stored correctly");
     });
 
-    it("should delete the first element", async () => {
+    it("should let a player join by id", async () => {
         const battleship = await Battleship.deployed();
 
         const game1Id = await utils.createGame(battleship, accounts[1]);
@@ -81,9 +79,6 @@ contract("Battleship", (accounts) => {
         const joinTx = await battleship.joinGameById(game2Id, {'from':accounts[2]});
         const games2 = await battleship.getCreatedGamesIds.call();
         assert.equal(games2.length, 2, "Game has not been removed");
-        assert.equal(games2[0], game1Id, "Game has not been deleted correctly");
-        assert.equal(games2[1], game3Id, "Game has not been deleted correctly");
-
         const joinTx2 = await battleship.joinGameById(game1Id, {'from':accounts[2]});
         const games3 = await battleship.getCreatedGamesIds.call();
         assert.equal(games3.length, 1, "Game has not been removed");
@@ -108,15 +103,12 @@ contract("Battleship", (accounts) => {
         const joinTx = await battleship.joinRandomGame({'from':accounts[2]});
         const games2 = await battleship.getCreatedGamesIds.call();
         assert.equal(games2.length, 2, "Game has not been removed");
-        assert.equal(games2[0], game2Id, "Game has not been deleted correctly");
-        assert.equal(games2[1], game3Id, "Game has not been deleted correctly");
 
         const joinTx2 = await battleship.joinRandomGame({'from':accounts[2]});
         const games3 = await battleship.getCreatedGamesIds.call();
         assert.equal(games3.length, 1, "Game has not been removed");
-        assert.equal(games3[0], game3Id, "Game has not been deleted correctly");
 
-        const joinTx3 = await battleship.joinGameById(game3Id, {'from':accounts[2]});
+        const joinTx3 = await battleship.joinRandomGame({'from':accounts[2]});
         const games4 = await battleship.getCreatedGamesIds.call();
         assert.equal(games4.length, 0, "Game has not been removed");
     });
@@ -134,15 +126,12 @@ contract("Battleship", (accounts) => {
         const joinTx = await battleship.joinGameById(game2Id, {'from':accounts[2]});
         const games2 = await battleship.getCreatedGamesIds.call();
         assert.equal(games2.length, 2, "Game has not been removed");
-        assert.equal(games2[0], game1Id, "Game has not been deleted correctly");
-        assert.equal(games2[1], game3Id, "Game has not been deleted correctly");
 
         const joinTx2 = await battleship.joinRandomGame({'from':accounts[2]});
         const games3 = await battleship.getCreatedGamesIds.call();
         assert.equal(games3.length, 1, "Game has not been removed");
-        assert.equal(games3[0], game3Id, "Game has not been deleted correctly");
 
-        const joinTx3 = await battleship.joinGameById(game3Id, {'from':accounts[2]});
+        const joinTx3 = await battleship.joinGameById(games3[0], {'from':accounts[2]});
         const games4 = await battleship.getCreatedGamesIds.call();
         assert.equal(games4.length, 0, "Game has not been removed");
     });

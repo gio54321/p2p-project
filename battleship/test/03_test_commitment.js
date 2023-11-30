@@ -3,8 +3,6 @@ var Battleship = artifacts.require('Battleship');
 
 const utils = require('../utils/utils.js');
 
-// clean room environment to test created games linked list functionality
-
 contract("Battleship", (accounts) => {
     it("should compute the right Merkle root from a Merkle proof", async () => {
         const battleship = await Battleship.deployed();
@@ -31,7 +29,6 @@ contract("Battleship", (accounts) => {
         const joinTx = await battleship.joinGameById(gameId, {'from':accounts[2]});
         
         const players = await battleship.getGamePlayers(gameId);
-        console.log(players)
 
         const commit1Tx = await battleship.commitBoard(gameId, root, {'from':accounts[1], value:web3.utils.toWei("42", 'lovelace')});
         let state = await battleship.getGamePhase.call(gameId);
@@ -39,6 +36,17 @@ contract("Battleship", (accounts) => {
 
         const commit2Tx = await battleship.commitBoard(gameId, root, {'from':accounts[2], value:web3.utils.toWei("42", 'lovelace')});
         let state2 = await battleship.getGamePhase.call(gameId);
-        assert.equal(state2, "WAITING_COMMITMENT", "Game phase is incorrect");
+        assert.equal(state2, "WAITING_PLAYER_1_GUESS", "Game phase is incorrect");
+    });
+
+    it("should let players reveal the correct value", async () => {
+        const battleship = await Battleship.deployed();
+        const board1 = [1, 0, 1, 0, 0, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1];
+        const boardValues1 = board1.map(utils.generateBoardValue);
+        const board2 = [0, 1, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0];
+        const boardValues2 = board2.map(utils.generateBoardValue);
+
+        const gameId = await utils.setupTestGame(battleship, accounts[2], accounts[3], boardValues1, boardValues2);
+        console.log(gameId);
     });
 });
