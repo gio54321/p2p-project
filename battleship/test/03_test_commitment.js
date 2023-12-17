@@ -18,6 +18,7 @@ contract("Battleship", (accounts) => {
             assert.equal(root, rootComputedByContract);
         }
     });
+
     it("should let players commit a root and some wei", async () => {
         const battleship = await Battleship.deployed();
         const board = [1, 0, 1, 0, 0, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1];
