@@ -1,14 +1,12 @@
 <script>
-import { Alert, Button } from 'flowbite-svelte';
-
-import {
-  selectedAccount,
-} from 'svelte-web3';
-
-import {connected, connectProvider, disconnectProvider} from '$lib/js/battleship';
-import { toast } from '@zerodevx/svelte-toast'
-
-
+	import Game from '$lib/components/Game.svelte';
 </script>
 
-Some content
+<div class="mt-16 w-full">
+
+  <div class="flex items-center justify-center">
+    <div class="w-full mx-14 xl:mx-0">
+      <Game></Game>
+    </div>
+  </div>
+</div>
