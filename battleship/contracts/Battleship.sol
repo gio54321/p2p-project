@@ -360,4 +360,9 @@ contract Battleship {
 		require(gameId < games.length, "Game does not exists");
 		return (games[gameId].playerState1.playerAddress, games[gameId].playerState2.playerAddress);
 	}
+
+    // function that tests the interaction between the frontend and contract
+    function sanityCheck(string memory greet) public pure returns (string memory) {
+        return string.concat("Hello ", greet);
+    }
 }
