@@ -5,10 +5,7 @@
 
 	async function sanityCheck() {
 		if ($connected) {
-            console.log($battleshipInstance);
-            //let asd = await $battleshipInstance.methods.sanityCheck("1234").send({"from" : $selectedAccount});
             let asd = await $battleshipInstance.methods.sanityCheck("1234").call();
-            console.log(asd);
 			return asd;
 		}
 	}

@@ -10,7 +10,7 @@ export type Ship = {
 
 function createShips() {
     let initialShips = Array(allowedShips.length).fill(null);
-	const { subscribe, set, update } = writable<(Ship | null)[]>(initialShips);
+	const { subscribe, update } = writable<(Ship | null)[]>(initialShips);
 
 	return {
 		subscribe,

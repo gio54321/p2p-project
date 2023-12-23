@@ -1,5 +1,3 @@
-import Web3 from 'web3';
-
 import { web3 } from 'svelte-web3'
 import { get } from 'svelte/store'
 

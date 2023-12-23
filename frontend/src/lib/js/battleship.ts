@@ -55,3 +55,49 @@ export let battleshipInstance = derived(connected, (connected) => {
     }
 });
 
+export async function createGame(): Promise<null | number> {
+    if (!get(connected)) {
+        return null;
+    }
+    let battleship = get(battleshipInstance);
+
+    let creationTx = await battleship.methods.createGame().send({ from: get(selectedAccount) });
+    let events = await battleship.getPastEvents('GameCreated', {
+        fromBlock:creationTx.blockNumber,
+    });
+    for (let e of events) {
+        // We convert to lowercase the addresses because
+        // addresses may have uppercase letters for checksum purposes
+        // @ts-ignore
+        if (e.returnValues.owner.toLowerCase() === get(selectedAccount).toLowerCase()) {
+            return events[0].returnValues.id;
+        }
+    }
+    return null;
+}
+
+export async function joinGameById(id: any): Promise<any> {
+    if (!get(connected)) {
+        return null;
+    }
+    let battleship = get(battleshipInstance);
+    console.log('cazzi', id, typeof id);
+    let joinTx = await battleship.methods.joinGameById(id).send({ from: get(selectedAccount) });
+    console.log(joinTx)
+    return joinTx;
+}
+
+export async function getCreatedGames(): Promise<any[]> {
+    if (!get(connected)) {
+        return [];
+    }
+    let battleship = get(battleshipInstance);
+    let ids = await battleship.methods.getCreatedGamesIds().call();
+    let owners = await battleship.methods.getCreatedGamesOwners().call();
+    let result = []
+    for (let i in ids) {
+        result.push({'id': ids[i], "owner": owners[i]});
+    }
+    return result;
+}
+
