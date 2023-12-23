@@ -32,7 +32,7 @@ struct GameStateStruct {
 	PlayerStateStruct playerState2;
 	CellGuessStruct currentGuess;
 
-	// 0 -> no winner (yet)
+	// 0 -> no winner (default)
 	// 1 -> player 1
 	// 2 -> player 2
 	uint8 winner;
@@ -151,6 +151,14 @@ contract Battleship {
 		return createdGames;
 	}
 
+	function getCreatedGamesOwners() public view returns (address[] memory) {
+        address[] memory result = new address[](createdGames.length);
+        for (uint i=0; i < createdGames.length; ++i) {
+            result[i] = games[createdGames[i]].playerState1.playerAddress;
+        }
+        return result;
+	}
+
 	function joinGameById(uint256 gameId) public {
 		require(gameId < games.length, "Game with that id does not exists");
 
@@ -163,6 +171,9 @@ contract Battleship {
 		// make a player join a game
 		require(gameId < games.length, "Game with that id does not exists");
 		require(games[gameId].gamePhase == GamePhaseEnum.CREATED, "Game already started");
+
+        // require that the second player is different than the first one
+        require(games[gameId].playerState1.playerAddress != msg.sender, "The creator cannot join its own game");
 
 		// first remove it from the createdGames set
 		removeFromCreatedGames(gameId);
