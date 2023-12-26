@@ -46,6 +46,7 @@ contract Battleship {
 
 	event GameCreated(address owner, uint256 id);
 	event GameReady(address player2, uint256 id);
+	event GameStarted(uint256 id);
 
 	// Array of all the games
 	GameStateStruct[] games;
@@ -217,6 +218,7 @@ contract Battleship {
 		if (bothPlayersCommitted) {
 			// TODO some kind of randomization to who starts?
 			games[gameId].gamePhase = GamePhaseEnum.WAITING_PLAYER_1_GUESS;
+			emit GameStarted(gameId);
 		}
 	}
 

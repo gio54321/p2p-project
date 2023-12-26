@@ -2,6 +2,14 @@ import { web3 } from 'svelte-web3'
 import { get } from 'svelte/store'
 
 
+
+function concatenateBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
+    let result = new Uint8Array(a.length + b.length);
+    result.set(a);
+    result.set(b, a.length);
+    return result;
+}
+
 /**
  * 
  * @param {number} value (0 or 1)
@@ -33,7 +41,7 @@ function computeMerkleRootRecursive(commitments: string[], start: number, stop: 
     if (stop - start == 2) {
         const left = commitments[start];
         const right = commitments[start + 1];
-        const hashInput = utils.bytesToHex(left.concat(right));
+        const hashInput = concatenateBytes(utils.hexToBytes(left), utils.hexToBytes(right));
         const result = utils.soliditySha3(hashInput);
         if (result === undefined) {
             throw Error("Sha3 returned undefined")
@@ -44,8 +52,7 @@ function computeMerkleRootRecursive(commitments: string[], start: number, stop: 
     const mid = (start + stop) / 2;
     const leftRoot = computeMerkleRootRecursive(commitments, start, mid);
     const rightRoot = computeMerkleRootRecursive(commitments, mid, stop)
-    // TODO test if this is actually correct
-    const hashInput = utils.bytesToHex(leftRoot.concat(rightRoot));
+    const hashInput = concatenateBytes(utils.hexToBytes(leftRoot), utils.hexToBytes(rightRoot));
     const result = utils.soliditySha3(hashInput);
     if (result === undefined) {
         throw Error("Sha3 returned undefined")
@@ -62,7 +69,7 @@ function computeMerkleProofRecursive(commitments: string[], position: number, st
     if (stop - start == 2) {
         const left = commitments[start];
         const right = commitments[start + 1];
-        const hashInput = utils.bytesToHex(left.concat(right));
+        const hashInput = concatenateBytes(utils.hexToBytes(left), utils.hexToBytes(right));
         const result = utils.soliditySha3(hashInput);
         if (result === undefined) {
             throw Error("Sha3 returned undefined")
@@ -80,7 +87,7 @@ function computeMerkleProofRecursive(commitments: string[], position: number, st
     const mid = (start + stop) / 2;
     const [leftRoot, leftProof] = computeMerkleProofRecursive(commitments, position, start, mid);
     const [rightRoot, rightProof] = computeMerkleProofRecursive(commitments, position, mid, stop);
-    const hashInput = utils.bytesToHex(leftRoot.concat(rightRoot));
+    const hashInput = concatenateBytes(utils.hexToBytes(leftRoot), utils.hexToBytes(rightRoot));
     const result = utils.soliditySha3(hashInput);
     if (result === undefined) {
         throw Error("Sha3 returned undefined")

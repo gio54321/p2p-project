@@ -1,35 +1,28 @@
 <script lang="ts">
-	import Game from '$lib/components/Game.svelte';
-	import { connected, battleshipInstance } from '$lib/js/battleship';
-    import {selectedAccount} from 'svelte-web3'
-
+	import { Button } from 'flowbite-svelte';
+	import { connected, battleshipInstance, loadGameFromLocalStorage } from '$lib/js/battleship';
+	import { goto } from '$app/navigation';
 	async function sanityCheck() {
 		if ($connected) {
-            let asd = await $battleshipInstance.methods.sanityCheck("1234").call();
+			let asd = await $battleshipInstance.methods.sanityCheck('1234').call();
 			return asd;
 		}
 	}
 
-    let msg = Promise.resolve('not connected');
+	let msg = Promise.resolve('not connected');
 
+	$: if ($connected) {
+		msg = sanityCheck();
+	}
 
-    $: if ($connected) {
-        msg = sanityCheck();
-    }
+	function loadGame() {
+		loadGameFromLocalStorage();
+		goto('/play');
+	}
 </script>
 
 <div class="mt-16 w-full">
 	<div class="flex items-center justify-center">
-		<div class="mx-14 w-full xl:mx-0">
-			<Game></Game>
-		</div>
+		<Button on:click={loadGame}>Load game</Button>
 	</div>
 </div>
-
-{#await msg}
-	<p>...waiting</p>
-{:then number}
-	<p>The number is {number}</p>
-{:catch error}
-	<p style="color: red">{error.message}</p>
-{/await}
