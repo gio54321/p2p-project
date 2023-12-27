@@ -6,7 +6,7 @@ import {
 import { derived, get, writable, type Writable } from 'svelte/store';
 import { toast } from '@zerodevx/svelte-toast'
 import BattleshipContract from '$lib/contracts/Battleship.json';
-import { computeMerkleRoot, generateBoardValue, generateCommitment } from './merkleProofs';
+import { computeMerkleProof, computeMerkleRoot, generateBoardValue, generateCommitment } from './merkleProofs';
 import { browser } from '$app/environment';
 
 export let boardSize = 8;
@@ -42,6 +42,91 @@ export type Ship = {
     isHorizontal: number,
 };
 
+export enum GameStateEnum {
+    WaitingForPlayer,
+    WaitingForCommit,
+    Guessing,
+    Revealing,
+    WaitingGuessing,
+    WaitingRevealing,
+    BoardReveal,
+    Finished,
+}
+
+export let gameState = writable(GameStateEnum.WaitingForPlayer);
+
+export function getGameStateString(state: GameStateEnum): string {
+    switch (state) {
+        case GameStateEnum.WaitingForPlayer:
+            return "Waiting for player";
+        case GameStateEnum.WaitingForCommit:
+            return "Waiting for commitment";
+        case GameStateEnum.Guessing:
+            return "Guess a cell";
+        case GameStateEnum.Revealing:
+            return "You need to reveal a cell";
+        case GameStateEnum.WaitingGuessing:
+            return "Waiting for other player to guess";
+        case GameStateEnum.WaitingRevealing:
+            return "Waiting for other player to reveal the cell";
+        case GameStateEnum.BoardReveal:
+            return "Board reveal";
+        case GameStateEnum.Finished:
+            return "Finished";
+    }
+}
+
+
+export async function getGamePhase(): Promise<any> {
+    if (!get(connected)) {
+        return null;
+    }
+    let battleship = get(battleshipInstance);
+    let gameId = get(currentGameId);
+    let gameState = await battleship.methods.getGamePhase(gameId).call();
+    return gameState;
+}
+
+async function getPlayerNumber(): Promise<any> {
+    if (!get(connected)) {
+        return null;
+    }
+    let battleship = get(battleshipInstance);
+    let gameId = get(currentGameId);
+    let address = get(selectedAccount);
+    let playerNumber = await battleship.methods.getPlayerGameNumber(gameId, address).call();
+    return playerNumber;
+}
+
+export async function refreshGameState() {
+    let gamePhase = await getGamePhase();
+    console.log(gamePhase);
+
+    let playerNumber = await getPlayerNumber();
+    console.log(playerNumber);
+
+    let myPlayerNumber = playerNumber.toString();
+    let otherPlayerNumber = myPlayerNumber === "1" ? "2" : "1";
+
+    if (gamePhase === `CREATED`) {
+        gameState.set(GameStateEnum.WaitingForPlayer);
+    } else if (gamePhase === `WAITING_COMMITMENT`) {
+        gameState.set(GameStateEnum.WaitingForCommit);
+    } else if (gamePhase === `WAITING_PLAYER_${myPlayerNumber}_GUESS`) {
+        gameState.set(GameStateEnum.Guessing);
+    } else if (gamePhase === `WAITING_PLAYER_${otherPlayerNumber}_GUESS`) {
+        gameState.set(GameStateEnum.WaitingGuessing);
+    } else if (gamePhase === `WAITING_PLAYER_${myPlayerNumber}_VALUE`) {
+        gameState.set(GameStateEnum.Revealing);
+    } else if (gamePhase === `WAITING_PLAYER_${otherPlayerNumber}_VALUE`) {
+        gameState.set(GameStateEnum.WaitingRevealing);
+    } else if (gamePhase === `WAITING_BOARD_REVEAL`) {
+        gameState.set(GameStateEnum.BoardReveal);
+    } else if (gamePhase === `FINISHED`) {
+        gameState.set(GameStateEnum.Finished);
+    }
+}
+
 function createShips() {
     let initialShips = Array(allowedShips.length).fill(null);
     const { subscribe, update } = writable<(Ship | null)[]>(initialShips);
@@ -67,6 +152,10 @@ function createShips() {
                 arr[id] = null;
                 return arr;
             });
+        },
+        isValid: () => {
+            let shipNumber = get(boardShips).filter((s) => s !== null).length;
+            return shipNumber === allowedShips.length;
         },
         toJSON: () => {
             return JSON.stringify(get(boardShips));
@@ -104,10 +193,11 @@ export const boardValues = derived(boardShips, (ships) => {
 
 export const connected = derived(selectedAccount, ($a) => $a !== undefined);
 
-
 // saved in local storage
 export const currentGameId: Writable<null | number> = writable(null);
 export const boardValuesNonces: Writable<string[]> = writable([]);
+export const opponentBoardValues: Writable<(0 | 1 | null)[]> = writable([]);
+export const boardValuesRevealed: Writable<boolean[]> = writable([]);
 
 export function loadGameFromLocalStorage() {
     let utils = get(web3).utils;
@@ -127,6 +217,14 @@ export function loadGameFromLocalStorage() {
     if (boardShipsString !== null) {
         boardShips.fromJSON(boardShipsString);
     }
+    let opponentBoardValuesString = localStorage.getItem("opponentBoardValues");
+    if (opponentBoardValuesString !== null) {
+        opponentBoardValues.set(JSON.parse(opponentBoardValuesString));
+    }
+    let boardValuesRevealedString = localStorage.getItem("boardValuesRevealed");
+    if (boardValuesRevealedString !== null) {
+        boardValuesRevealed.set(JSON.parse(boardValuesRevealedString));
+    }
 }
 
 export function saveGameToLocalStorage() {
@@ -140,6 +238,18 @@ export function saveGameToLocalStorage() {
     localStorage.setItem("boardValuesNonces", boardValuesNoncesValue);
     let boardShipsValue = boardShips.toJSON();
     localStorage.setItem("boardShips", boardShipsValue);
+    let opponentBoardValuesValue = JSON.stringify(get(opponentBoardValues));
+    localStorage.setItem("opponentBoardValues", opponentBoardValuesValue);
+    let boardValuesRevealedValue = JSON.stringify(get(boardValuesRevealed));
+    localStorage.setItem("boardValuesRevealed", boardValuesRevealedValue);
+}
+
+export function clearLocalStorage() {
+    localStorage.removeItem("currentGameId");
+    localStorage.removeItem("boardValuesNonces");
+    localStorage.removeItem("boardShips");
+    localStorage.removeItem("opponentBoardValues");
+    localStorage.removeItem("boardValuesRevealed");
 }
 
 export function connectProvider() {
@@ -151,11 +261,59 @@ export function disconnectProvider() {
     toast.push("Account disconnected");
 }
 
+let subscriptionGamePhaseGhanged = '';
+let subscriptionBoardValueRevealed = '';
+
 export let battleshipInstance = derived(connected, (connected) => {
     if (connected) {
         let web3Instance = get(web3);
         let address = BattleshipContract.networks["5777"].address;
-        return new web3Instance.eth.Contract(BattleshipContract.abi, address);
+        let contract = new web3Instance.eth.Contract(BattleshipContract.abi, address);
+
+        console.log('installing event listeners');
+        console.log(contract.events);
+        console.log(contract.events.GamePhaseChanged());
+        // install event listeners
+        if (subscriptionGamePhaseGhanged === '') {
+            contract.events.GamePhaseChanged()
+                .on('connected', (subscriptionId: string) => {
+                    subscriptionGamePhaseGhanged = subscriptionId;
+                })
+            contract.events.GamePhaseChanged().on('data', () => {
+                console.log('game phase changed event');
+                refreshGameState();
+                saveGameToLocalStorage();
+            });
+        }
+
+        if (subscriptionBoardValueRevealed === '') {
+            contract.events.BoardValueRevealed()
+                .on('connected', (subscriptionId: string) => {
+                    subscriptionBoardValueRevealed = subscriptionId;
+                });
+            contract.events.BoardValueRevealed().on('data', async (data: any) => {
+                console.log('board value revealed event');
+                console.log(data);
+                if (data.returnValues.gameId.toString() !== get(currentGameId)?.toString()) {
+                    return;
+                }
+
+                let playerNumber = await getPlayerNumber();
+                if (data.returnValues.playerNumber.toString() === playerNumber.toString()) {
+                    let index = parseInt(data.returnValues.x) + parseInt(data.returnValues.y) * boardSize;
+                    let revealed = get(boardValuesRevealed);
+                    revealed[index] = true;
+                    boardValuesRevealed.set(revealed);
+                } else {
+                    let index = parseInt(data.returnValues.x) + parseInt(data.returnValues.y) * boardSize;
+                    let opponentBoard = get(opponentBoardValues);
+                    let value: (0 | 1) = data.returnValues.value ? 1 : 0;
+                    opponentBoard[index] = value;
+                    opponentBoardValues.set(opponentBoard);
+                }
+            });
+        }
+        return contract;
     } else {
         return null;
     }
@@ -231,12 +389,44 @@ export async function commitBoard(commitAmount: any): Promise<any> {
     return commitTx;
 }
 
-export async function getGameState(): Promise<any> {
+export async function guessCell(x: number, y: number): Promise<any> {
     if (!get(connected)) {
         return null;
     }
     let battleship = get(battleshipInstance);
     let gameId = get(currentGameId);
-    let gameState = await battleship.methods.getGameState(gameId).call();
-    return gameState;
+    let guessTx = await battleship.methods.guessCell(gameId, x, y).send({ from: get(selectedAccount) });
+    return guessTx;
+}
+
+export async function revealValue(): Promise<any> {
+    if (!get(connected)) {
+        return null;
+    }
+    let battleship = get(battleshipInstance);
+    let gameId = get(currentGameId);
+    let guess = await getCurrentGuess();
+    console.log(guess);
+
+    // we can use a number here because the board size is small
+    let x = parseInt(guess[0].toString());
+    let y = parseInt(guess[1].toString());
+    let index = x + y * boardSize;
+
+    let nonce = get(boardValuesNonces)[index];
+    let commitments = get(boardValuesNonces).map((x) => generateCommitment(x));
+    let proof = computeMerkleProof(commitments, index);
+
+    let revealTx = await battleship.methods.revealValue(gameId, x, y, nonce, proof).send({ from: get(selectedAccount) });
+    return revealTx;
+}
+
+async function getCurrentGuess(): Promise<any> {
+    if (!get(connected)) {
+        return null;
+    }
+    let battleship = get(battleshipInstance);
+    let gameId = get(currentGameId);
+    let guess = await battleship.methods.getCurrentGuess(gameId).call();
+    return guess;
 }

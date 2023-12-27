@@ -14,7 +14,8 @@ contract("Battleship", (accounts) => {
 
         for (let i=0; i<board.length; ++i) {
             const proof = utils.computeMerkleProof(commitments, i);
-            const rootComputedByContract = await battleship.computeMerkleRootFromProof.call(board.length, i, boardValues[i], proof);
+            console.log(proof.length);
+            const rootComputedByContract = await battleship.computeMerkleRootFromProof.call(4, i, boardValues[i], proof);
             assert.equal(root, rootComputedByContract);
         }
     });

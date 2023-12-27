@@ -47,6 +47,8 @@ contract Battleship {
 	event GameCreated(address owner, uint256 id);
 	event GameReady(address player2, uint256 id);
 	event GameStarted(uint256 id);
+	event GamePhaseChanged(uint256 id);
+	event BoardValueRevealed(uint256 gameId, uint16 x, uint16 y, uint16 playerNumber, bool value);
 
 	// Array of all the games
 	GameStateStruct[] games;
@@ -58,16 +60,22 @@ contract Battleship {
 	// random counter
 	uint256 randomCounter;
 
-	// utils LUT for computing log2 of a power of 2
-	mapping(uint16 => uint16) log2LUT;
-
 	constructor() {
-		log2LUT[4] = 2;
-		log2LUT[16] = 4;
-		log2LUT[64] = 6;
-		log2LUT[256] = 8;
-
 		randomCounter = 0;
+	}
+
+	function log2(uint16 x) private pure returns (uint16) {
+		// returns the log2 of x, rounded down
+		// if x is not a power of 2, returns 0
+		uint16 result = 0;
+		while (x > 1) {
+			if (x % 2 != 0) {
+				return 0;
+			}
+			x = x / 2;
+			result += 1;
+		}
+		return result;
 	}
 
 	function getRandomValue(uint256 b) private returns (uint256) {
@@ -123,7 +131,7 @@ contract Battleship {
 
 		// create the game struct
 		games.push(GameStateStruct(
-			16, // TODO make this parametric?
+			8, // TODO make this parametric?
 			GamePhaseEnum.CREATED,
 			PlayerStateStruct(msg.sender, "", 0, 0),
 			PlayerStateStruct(address(0), "", 0, 0),
@@ -250,11 +258,13 @@ contract Battleship {
 		// store the guess
 		games[gameId].currentGuess.x = x;
 		games[gameId].currentGuess.y = y;
+
+		emit GamePhaseChanged(gameId);
 	}
 
 	function computeMerkleRootFromProof(uint256 boardSize, uint16 position, bytes32 inputData, bytes32[] calldata merkleProof)
-			public view returns (bytes32) {
-		uint16 boardSizeLog = log2LUT[uint16(boardSize)];
+			public pure returns (bytes32) {
+		uint16 boardSizeLog = log2(uint16(boardSize*boardSize));
 		require(boardSizeLog != 0, "Incorrect board size");
 		require(merkleProof.length == boardSizeLog, "Incorrect proof length");
 
@@ -316,7 +326,7 @@ contract Battleship {
 				game.winner = 2;
 				game.gamePhase = GamePhaseEnum.WAITING_BOARD_REVEAL;
 			} else {
-				game.gamePhase = GamePhaseEnum.WAITING_PLAYER_2_GUESS;
+				game.gamePhase = GamePhaseEnum.WAITING_PLAYER_1_GUESS;
 			}
 		} else {
 			require(computedRoot == game.playerState2.committedBoardRoot, "Merkle proof is not correct");
@@ -327,12 +337,19 @@ contract Battleship {
 				game.winner = 1;
 				game.gamePhase = GamePhaseEnum.WAITING_BOARD_REVEAL;
 			} else {
-				game.gamePhase = GamePhaseEnum.WAITING_PLAYER_1_GUESS;
+				game.gamePhase = GamePhaseEnum.WAITING_PLAYER_2_GUESS;
 			}
 		}
 
-		// TODO refactora sta cosa pls 
+		// TODO refactora sta cosa pls
+		// io del futuro: no
+		// terza volta che vedo sto todo: no
 		games[gameId] = game;
+
+		emit GamePhaseChanged(gameId);
+
+		uint16 playerNumber = getPlayerGameNumber(gameId, msg.sender);
+		emit BoardValueRevealed(gameId, x, y, playerNumber, cellValue == 1);
 	}
 
 	function accuseIdle(uint256 gameId) public {
@@ -374,8 +391,30 @@ contract Battleship {
 		return (games[gameId].playerState1.playerAddress, games[gameId].playerState2.playerAddress);
 	}
 
-    // function that tests the interaction between the frontend and contract
-    function sanityCheck(string memory greet) public pure returns (string memory) {
-        return string.concat("Hello ", greet);
-    }
+	function getCurrentGuess(uint256 gameId) public view returns (uint16, uint16) {
+		require(gameId < games.length, "Game does not exists");
+		return (games[gameId].currentGuess.x, games[gameId].currentGuess.y);
+	}
+
+	function getBoardSize(uint256 gameId) public view returns (uint16) {
+		require(gameId < games.length, "Game does not exists");
+		return games[gameId].boardSize;
+	}
+
+	/**
+	 * Returns the number of the player in the game
+	 * @param gameId The id of the game
+	 * @param player The address of the player
+	 * @return 0 if the player is not in the game, 1 if it is player 1, 2 if it is player 2
+	 */
+	function getPlayerGameNumber(uint256 gameId, address player) public view returns (uint16) {
+		require(gameId < games.length, "Game does not exists");
+		if (player == games[gameId].playerState1.playerAddress) {
+			return 1;
+		} else if (player == games[gameId].playerState2.playerAddress) {
+			return 2;
+		} else {
+			return 0;
+		}
+	}
 }

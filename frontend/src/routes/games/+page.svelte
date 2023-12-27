@@ -20,6 +20,7 @@
 	} from '$lib/js/battleship';
 	import { toast } from '@zerodevx/svelte-toast';
 	import { goto } from '$app/navigation';
+	import Game from '$lib/components/Game.svelte';
 
 	let gameCreated: null | Promise<null | number> = null;
 	let gameJoined: null | Promise<any> = null;
@@ -148,7 +149,7 @@
 									<TableBodyCell>{game.id}</TableBodyCell>
 									<TableBodyCell>
 										<button
-											class="font-medium text-primary-600 hover:underline dark:text-primary-500"
+											class="text-primary-600 dark:text-primary-500 font-medium hover:underline"
 											on:click={() => joinGameByIdLocal(game.id)}
 											>Join game
 										</button>

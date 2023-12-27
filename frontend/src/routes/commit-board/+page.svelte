@@ -8,7 +8,8 @@
 		boardValues,
 		boardShips,
 		currentGameId,
-		saveGameToLocalStorage
+		saveGameToLocalStorage,
+		clearLocalStorage
 	} from '$lib/js/battleship';
 	import { Trash } from 'svelte-heros-v2';
 	import { Button, Kbd, Input, Label, NumberInput } from 'flowbite-svelte';
@@ -99,6 +100,8 @@
 			return;
 		}
 
+		// TODO: check if the board is valid
+
 		commit = commitBoard(commitAmountWei);
 	}
 
@@ -108,6 +111,7 @@
 			console.log(data);
 			if (data.returnValues.id == $currentGameId) {
 				toast.push('Game started');
+				clearLocalStorage();
 				saveGameToLocalStorage();
 				goto('/play');
 			}
