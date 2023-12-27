@@ -9,7 +9,7 @@
 		boardShips,
 		currentGameId,
 		saveGameToLocalStorage,
-		clearLocalStorage
+		clearLocalStorageAndState
 	} from '$lib/js/battleship';
 	import { Trash } from 'svelte-heros-v2';
 	import { Button, Kbd, Input, Label, NumberInput } from 'flowbite-svelte';
@@ -25,26 +25,26 @@
 	let gridValues: number[] = [];
 	let hoverIds: number[] = [];
 	gridBlocks = [];
-	for (let i = 0; i < boardSize * boardSize; i++) {
+	for (let i = 0; i < $boardSize * $boardSize; i++) {
 		gridBlocks = [...gridBlocks, `block-${i}`];
 		hoverIds = [...hoverIds, 0];
 	}
 
 	let currentlySelectedShip = -1;
 	$: currentShipLength =
-		currentlySelectedShip >= 0 ? allowedShips[currentlySelectedShip].length : 1;
+		currentlySelectedShip >= 0 ? $allowedShips[currentlySelectedShip].length : 1;
 	let currentShipOrientation = 0;
 	$: gridValues = $boardValues;
 
 	function handleClick(index: number) {
-		let x = index % boardSize;
-		let y = Math.floor(index / boardSize);
+		let x = index % $boardSize;
+		let y = Math.floor(index / $boardSize);
 		if (
-			(currentShipOrientation === 1 && y < boardSize - currentShipLength + 1) ||
-			(currentShipOrientation === 0 && x < boardSize - currentShipLength + 1)
+			(currentShipOrientation === 1 && y < $boardSize - currentShipLength + 1) ||
+			(currentShipOrientation === 0 && x < $boardSize - currentShipLength + 1)
 		) {
 			for (let i = 0; i < currentShipLength; i++) {
-				if (gridValues[index + i * (1 + currentShipOrientation * 7)] === 1) {
+				if (gridValues[index + i * (1 + currentShipOrientation * ($boardSize - 1))] === 1) {
 					toast.push('Invalid ship placement');
 					return;
 				}
@@ -55,20 +55,20 @@
 	}
 
 	function handleMouseEnter(index: number) {
-		let x = index % boardSize;
-		let y = Math.floor(index / boardSize);
+		let x = index % $boardSize;
+		let y = Math.floor(index / $boardSize);
 		if (
-			(currentShipOrientation === 1 && y < boardSize - currentShipLength + 1) ||
-			(currentShipOrientation === 0 && x < boardSize - currentShipLength + 1)
+			(currentShipOrientation === 1 && y < $boardSize - currentShipLength + 1) ||
+			(currentShipOrientation === 0 && x < $boardSize - currentShipLength + 1)
 		) {
 			for (let i = 0; i < currentShipLength; i++) {
-				hoverIds[index + i * (1 + currentShipOrientation * 7)] = 1;
+				hoverIds[index + i * (1 + currentShipOrientation * ($boardSize - 1))] = 1;
 			}
 		}
 	}
 
 	function handleMouseLeave() {
-		for (let i = 0; i < boardSize * boardSize; i++) {
+		for (let i = 0; i < $boardSize * $boardSize; i++) {
 			hoverIds[i] = 0;
 		}
 	}
@@ -111,7 +111,6 @@
 			console.log(data);
 			if (data.returnValues.id == $currentGameId) {
 				toast.push('Game started');
-				clearLocalStorage();
 				saveGameToLocalStorage();
 				goto('/play');
 			}
@@ -130,7 +129,7 @@
 			<div class="flex justify-center">
 				<div
 					class="mr-10 flex flex-wrap justify-between"
-					style="width: {boardSize * 4 + 3}rem; height: {boardSize * 4 + 3}rem;"
+					style="width: {$boardSize * 4 + 3}rem; height: {$boardSize * 4 + 3}rem;"
 				>
 					{#each gridBlocks as id, index}
 						<button
@@ -149,7 +148,7 @@
 
 				<div>
 					<div class="mb-2 font-semibold">Select a ship:</div>
-					{#each allowedShips as ship, i}
+					{#each $allowedShips as ship, i}
 						<div>
 							<button
 								on:click={() => {

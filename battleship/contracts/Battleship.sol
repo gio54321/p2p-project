@@ -125,13 +125,15 @@ contract Battleship {
 		}
 	}
 
-	function createGame() public {
+	function createGame(uint16 boardSize) public {
+		require(boardSize == 8 || boardSize == 4, "Supported board sizes are 4 and 8");
+
 		// cacluate the game's id
 		uint256 id = games.length;
 
 		// create the game struct
 		games.push(GameStateStruct(
-			8, // TODO make this parametric?
+			boardSize,
 			GamePhaseEnum.CREATED,
 			PlayerStateStruct(msg.sender, "", 0, 0),
 			PlayerStateStruct(address(0), "", 0, 0),

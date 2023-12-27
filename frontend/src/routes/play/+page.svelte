@@ -16,12 +16,8 @@
 		opponentBoardValues,
 		boardValuesRevealed
 	} from '$lib/js/battleship';
-	import { Trash } from 'svelte-heros-v2';
 	import { Button, Kbd, Input, Label, NumberInput } from 'flowbite-svelte';
-	import { goto } from '$app/navigation';
 	import { connected, boardValuesNonces } from '$lib/js/battleship';
-	import { web3 } from 'svelte-web3';
-	import { onMount } from 'svelte';
 
 	let currentGuess = -1;
 
@@ -46,12 +42,12 @@
 	}
 
 	function guessCellLocal() {
-		if (currentGuess < 0 || currentGuess >= boardSize * boardSize) {
+		if (currentGuess < 0 || currentGuess >= $boardSize * $boardSize) {
 			toast.push('Invalid guess');
 			return;
 		}
-		let x = currentGuess % boardSize;
-		let y = Math.floor(currentGuess / boardSize);
+		let x = currentGuess % $boardSize;
+		let y = Math.floor(currentGuess / $boardSize);
 		guessCell(x, y);
 	}
 </script>
@@ -69,7 +65,7 @@
 				<div class="mr-16">
 					<div
 						class="flex flex-wrap justify-between"
-						style="width: {boardSize * 2 + 1}rem; height: {boardSize * 2 + 1}rem;"
+						style="width: {$boardSize * 2 + 1}rem; height: {$boardSize * 2 + 1}rem;"
 					>
 						{#each $boardValues as _, index}
 							<button
@@ -98,7 +94,7 @@
 				<div>
 					<div
 						class="flex flex-wrap justify-between"
-						style="width: {boardSize * 2 + 1}rem; height: {boardSize * 2 + 1}rem;"
+						style="width: {$boardSize * 2 + 1}rem; height: {$boardSize * 2 + 1}rem;"
 					>
 						{#each $boardValues as _, index}
 							<button

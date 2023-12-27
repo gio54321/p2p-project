@@ -14,7 +14,6 @@ contract("Battleship", (accounts) => {
 
         for (let i=0; i<board.length; ++i) {
             const proof = utils.computeMerkleProof(commitments, i);
-            console.log(proof.length);
             const rootComputedByContract = await battleship.computeMerkleRootFromProof.call(4, i, boardValues[i], proof);
             assert.equal(root, rootComputedByContract);
         }
@@ -58,6 +57,5 @@ contract("Battleship", (accounts) => {
         
         const proof = utils.computeMerkleProofFromValues(boardValues2, 0);
         let revealTx = await battleship.revealValue(gameId, web3.utils.BN("0"), web3.utils.BN("0"), boardValues2[0], proof, {'from':accounts[3]});
-        console.log(revealTx);
     });
 });

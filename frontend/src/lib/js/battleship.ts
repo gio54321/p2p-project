@@ -7,12 +7,12 @@ import { derived, get, writable, type Writable } from 'svelte/store';
 import { toast } from '@zerodevx/svelte-toast'
 import BattleshipContract from '$lib/contracts/Battleship.json';
 import { computeMerkleProof, computeMerkleRoot, generateBoardValue, generateCommitment } from './merkleProofs';
-import { browser } from '$app/environment';
 
-export let boardSize = 8;
+export let boardSize = writable(4);
 
-export const allowedShips = [
-    {
+const allowedShipsMap = {
+    // 8x8 board
+    8: [{
         'length': 2,
         'name': 'Destroyer'
     },
@@ -31,8 +31,26 @@ export const allowedShips = [
     {
         'length': 5,
         'name': 'Carrier'
-    }
-];
+    }],
+    // 4x4 board
+    4: [{
+        'length': 2,
+        'name': 'Destroyer'
+    },
+    {
+        'length': 2,
+        'name': 'Submarine'
+    },
+    {
+        'length': 3,
+        'name': 'Cruiser'
+    }]
+};
+
+export const allowedShips = derived(boardSize, (size) => {
+    // @ts-ignore
+    return allowedShipsMap[size];
+});
 
 
 export type BoardValues = number[];
@@ -128,13 +146,13 @@ export async function refreshGameState() {
 }
 
 function createShips() {
-    let initialShips = Array(allowedShips.length).fill(null);
+    let initialShips = Array(get(allowedShips).length).fill(null);
     const { subscribe, update } = writable<(Ship | null)[]>(initialShips);
 
     return {
         subscribe,
         setShip: (id: number, pos: number, isHorizontal: number) => {
-            if (id < 0 || id >= allowedShips.length) {
+            if (id < 0 || id >= get(allowedShips).length) {
                 return;
             }
 
@@ -144,7 +162,7 @@ function createShips() {
             });
         },
         removeShip: (id: number) => {
-            if (id < 0 || id >= allowedShips.length) {
+            if (id < 0 || id >= get(allowedShips).length) {
                 return;
             }
 
@@ -155,14 +173,14 @@ function createShips() {
         },
         isValid: () => {
             let shipNumber = get(boardShips).filter((s) => s !== null).length;
-            return shipNumber === allowedShips.length;
+            return shipNumber === get(allowedShips).length;
         },
         toJSON: () => {
             return JSON.stringify(get(boardShips));
         },
         fromJSON: (json: string) => {
             let ships = JSON.parse(json);
-            if (ships.length !== allowedShips.length) {
+            if (ships.length !== get(allowedShips).length) {
                 return;
             }
             update((arr) => {
@@ -176,15 +194,16 @@ export const boardShips = createShips();
 
 export const boardValues = derived(boardShips, (ships) => {
     let board: (0 | 1)[] = [];
-    for (let i = 0; i < boardSize * boardSize; i++) {
+    let size = get(boardSize);
+    for (let i = 0; i < size * size; i++) {
         board.push(0);
     }
 
     for (let i in ships) {
         let ship = ships[i];
         if (ship !== null) {
-            for (let j = 0; j < allowedShips[i].length; j++) {
-                board[ship.pos + j * (1 + ship.isHorizontal * 7)] = 1;
+            for (let j = 0; j < get(allowedShips)[i].length; j++) {
+                board[ship.pos + j * (1 + ship.isHorizontal * (get(boardSize) - 1))] = 1;
             }
         }
     }
@@ -225,6 +244,10 @@ export function loadGameFromLocalStorage() {
     if (boardValuesRevealedString !== null) {
         boardValuesRevealed.set(JSON.parse(boardValuesRevealedString));
     }
+    let boardSizeString = localStorage.getItem("boardSize");
+    if (boardSizeString !== null) {
+        boardSize.set(parseInt(boardSizeString));
+    }
 }
 
 export function saveGameToLocalStorage() {
@@ -242,14 +265,21 @@ export function saveGameToLocalStorage() {
     localStorage.setItem("opponentBoardValues", opponentBoardValuesValue);
     let boardValuesRevealedValue = JSON.stringify(get(boardValuesRevealed));
     localStorage.setItem("boardValuesRevealed", boardValuesRevealedValue);
+    let boardSizeValue = get(boardSize);
+    localStorage.setItem("boardSize", boardSizeValue.toString());
 }
 
-export function clearLocalStorage() {
+export function clearLocalStorageAndState() {
     localStorage.removeItem("currentGameId");
     localStorage.removeItem("boardValuesNonces");
     localStorage.removeItem("boardShips");
     localStorage.removeItem("opponentBoardValues");
     localStorage.removeItem("boardValuesRevealed");
+    boardValuesNonces.set([]);
+    boardShips.fromJSON("[]");
+    opponentBoardValues.set([]);
+    boardValuesRevealed.set([]);
+    boardSize.set(4);
 }
 
 export function connectProvider() {
@@ -299,18 +329,20 @@ export let battleshipInstance = derived(connected, (connected) => {
                 }
 
                 let playerNumber = await getPlayerNumber();
+                let size = get(boardSize);
                 if (data.returnValues.playerNumber.toString() === playerNumber.toString()) {
-                    let index = parseInt(data.returnValues.x) + parseInt(data.returnValues.y) * boardSize;
+                    let index = parseInt(data.returnValues.x) + parseInt(data.returnValues.y) * size;
                     let revealed = get(boardValuesRevealed);
                     revealed[index] = true;
                     boardValuesRevealed.set(revealed);
                 } else {
-                    let index = parseInt(data.returnValues.x) + parseInt(data.returnValues.y) * boardSize;
+                    let index = parseInt(data.returnValues.x) + parseInt(data.returnValues.y) * size;
                     let opponentBoard = get(opponentBoardValues);
                     let value: (0 | 1) = data.returnValues.value ? 1 : 0;
                     opponentBoard[index] = value;
                     opponentBoardValues.set(opponentBoard);
                 }
+                saveGameToLocalStorage();
             });
         }
         return contract;
@@ -319,13 +351,13 @@ export let battleshipInstance = derived(connected, (connected) => {
     }
 });
 
-export async function createGame(): Promise<null | number> {
+export async function createGame(boardSize: number): Promise<null | number> {
     if (!get(connected)) {
         return null;
     }
     let battleship = get(battleshipInstance);
 
-    let creationTx = await battleship.methods.createGame().send({ from: get(selectedAccount) });
+    let creationTx = await battleship.methods.createGame(boardSize).send({ from: get(selectedAccount) });
     let events = await battleship.getPastEvents('GameCreated', {
         fromBlock: creationTx.blockNumber,
     });
@@ -366,7 +398,8 @@ export async function getCreatedGames(): Promise<any[]> {
     let owners = await battleship.methods.getCreatedGamesOwners().call();
     let result = []
     for (let i in ids) {
-        result.push({ 'id': ids[i], "owner": owners[i] });
+        let boardSize = await battleship.methods.getBoardSize(ids[i]).call();
+        result.push({ 'id': ids[i], "owner": owners[i], "boardSize": parseInt(boardSize.toString()) });
     }
     result.sort((a, b) => a.id > b.id ? 1 : -1);
     return result;
@@ -411,7 +444,11 @@ export async function revealValue(): Promise<any> {
     // we can use a number here because the board size is small
     let x = parseInt(guess[0].toString());
     let y = parseInt(guess[1].toString());
-    let index = x + y * boardSize;
+    let index = x + y * get(boardSize);
+
+    console.log(index);
+    console.log(get(boardValuesNonces));
+
 
     let nonce = get(boardValuesNonces)[index];
     let commitments = get(boardValuesNonces).map((x) => generateCommitment(x));

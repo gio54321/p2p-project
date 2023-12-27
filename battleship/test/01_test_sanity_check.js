@@ -3,7 +3,7 @@ var Battleship = artifacts.require('Battleship')
 contract("Battleship", (accounts) => {
     it("Should create a game and return the id", async () => {
         const battleship = await Battleship.deployed();
-        const gameTx = await battleship.createGame({'from': accounts[2]});
+        const gameTx = await battleship.createGame(8, {'from': accounts[2]});
 
         let events = await battleship.getPastEvents('GameCreated', {
             fromBlock:gameTx.receipt.blockNumber,
@@ -16,8 +16,8 @@ contract("Battleship", (accounts) => {
 
     it("should return different ids for different games", async () => {
         const battleship = await Battleship.deployed();
-        const gameTx1 = await battleship.createGame({'from':accounts[1]});
-        const gameTx2 = await battleship.createGame({'from':accounts[2]});
+        const gameTx1 = await battleship.createGame(8, {'from':accounts[1]});
+        const gameTx2 = await battleship.createGame(8, {'from':accounts[2]});
 
         let events = await battleship.getPastEvents('GameCreated',{
             fromBlock:gameTx1.receipt.blockNumber,

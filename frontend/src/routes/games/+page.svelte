@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ButtonGroup, Button, Spinner } from 'flowbite-svelte';
+	import { ButtonGroup, Button, Spinner, Dropdown, DropdownItem } from 'flowbite-svelte';
 	import {
 		Table,
 		TableBody,
@@ -16,30 +16,33 @@
 		createGame,
 		getCreatedGames,
 		joinGameById,
-		currentGameId
+		currentGameId,
+		clearLocalStorageAndState,
+		boardSize
 	} from '$lib/js/battleship';
 	import { toast } from '@zerodevx/svelte-toast';
 	import { goto } from '$app/navigation';
-	import Game from '$lib/components/Game.svelte';
 
 	let gameCreated: null | Promise<null | number> = null;
 	let gameJoined: null | Promise<any> = null;
-	async function createGameLocal() {
+	async function createGameLocal(size: number) {
 		if (!$connected) {
 			toast.push('Not connected');
 			return;
 		}
-		gameCreated = createGame();
+		$boardSize = size;
+		gameCreated = createGame(size);
 		$currentGameId = await gameCreated;
 	}
 
-	function joinGameByIdLocal(id: number) {
+	function joinGameByIdLocal(id: number, size: number) {
 		console.log(id);
 		if (!$connected) {
 			toast.push('Not connected');
 			return;
 		}
 		gameJoined = joinGameById(id).then(() => {
+			$boardSize = size;
 			$currentGameId = id;
 			goto('/commit-board');
 		});
@@ -61,6 +64,7 @@
 			createdGamesList = getCreatedGames();
 			console.log(data);
 			if (data.returnValues.id == $currentGameId) {
+				clearLocalStorageAndState();
 				toast.push('Second player joined');
 				goto('/commit-board');
 			}
@@ -73,15 +77,24 @@
 	<div class="flex items-center justify-center">
 		<div class="mx-14 flex w-full justify-center xl:mx-0">
 			<ButtonGroup>
-				<Button
-					on:click={() => {
-						showCreatedGames = false;
-						createGameLocal();
-					}}
-				>
+				<Button>
 					<PlusSolid class="me-2 h-3 w-3" />
 					Create game
 				</Button>
+				<Dropdown>
+					<DropdownItem
+						on:click={() => {
+							showCreatedGames = false;
+							createGameLocal(4);
+						}}>4x4 board</DropdownItem
+					>
+					<DropdownItem
+						on:click={() => {
+							showCreatedGames = false;
+							createGameLocal(8);
+						}}>8x8 board</DropdownItem
+					>
+				</Dropdown>
 				<Button
 					on:click={() => {
 						showCreatedGames = !showCreatedGames;
@@ -138,6 +151,7 @@
 						<TableHead>
 							<TableHeadCell>Owner</TableHeadCell>
 							<TableHeadCell>Game id</TableHeadCell>
+							<TableHeadCell>Board size</TableHeadCell>
 							<TableHeadCell>
 								<span class="sr-only">Join game</span>
 							</TableHeadCell>
@@ -147,10 +161,11 @@
 								<TableBodyRow>
 									<TableBodyCell>{game.owner.toLowerCase()}</TableBodyCell>
 									<TableBodyCell>{game.id}</TableBodyCell>
+									<TableBodyCell>{game.boardSize}x{game.boardSize}</TableBodyCell>
 									<TableBodyCell>
 										<button
 											class="text-primary-600 dark:text-primary-500 font-medium hover:underline"
-											on:click={() => joinGameByIdLocal(game.id)}
+											on:click={() => joinGameByIdLocal(game.id, game.boardSize)}
 											>Join game
 										</button>
 									</TableBodyCell>

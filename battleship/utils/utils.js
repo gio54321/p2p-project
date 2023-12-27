@@ -1,5 +1,5 @@
 async function createGame(battleship, account) {
-    const gameTx = await battleship.createGame({'from': account});
+    const gameTx = await battleship.createGame(4, {'from': account});
     let events = await battleship.getPastEvents('GameCreated', {
         fromBlock:gameTx.receipt.blockNumber,
     });
