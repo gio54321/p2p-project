@@ -88,7 +88,7 @@ export function getGameStateString(state: GameStateEnum): string {
         case GameStateEnum.WaitingRevealing:
             return "Waiting for other player to reveal the cell";
         case GameStateEnum.BoardReveal:
-            return "Board reveal";
+            return "Game finished, you need to reveal the board";
         case GameStateEnum.Finished:
             return "Finished";
     }
@@ -121,7 +121,6 @@ export async function refreshGameState() {
     console.log(gamePhase);
 
     let playerNumber = await getPlayerNumber();
-    console.log(playerNumber);
 
     let myPlayerNumber = playerNumber.toString();
     let otherPlayerNumber = myPlayerNumber === "1" ? "2" : "1";
@@ -187,6 +186,11 @@ function createShips() {
                 return ships;
             });
         },
+        clear: () => {
+            update((arr) => {
+                return Array(get(allowedShips).length).fill(null);
+            });
+        }
     };
 }
 
@@ -276,10 +280,10 @@ export function clearLocalStorageAndState() {
     localStorage.removeItem("opponentBoardValues");
     localStorage.removeItem("boardValuesRevealed");
     boardValuesNonces.set([]);
-    boardShips.fromJSON("[]");
+    boardShips.clear();
     opponentBoardValues.set([]);
     boardValuesRevealed.set([]);
-    boardSize.set(4);
+    // NOTE: do not clear boardSize and currentGameId
 }
 
 export function connectProvider() {

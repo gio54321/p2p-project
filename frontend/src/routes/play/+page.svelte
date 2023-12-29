@@ -37,7 +37,7 @@
 		revealedValue = false;
 	}
 
-	$: if ($gameState === GameStateEnum.WaitingGuessing) {
+	$: if ($gameState === GameStateEnum.WaitingGuessing || $gameState === GameStateEnum.BoardReveal) {
 		currentGuess = -1;
 	}
 

@@ -30,6 +30,7 @@
 			toast.push('Not connected');
 			return;
 		}
+		clearLocalStorageAndState();
 		$boardSize = size;
 		gameCreated = createGame(size);
 		$currentGameId = await gameCreated;
@@ -41,6 +42,7 @@
 			toast.push('Not connected');
 			return;
 		}
+		clearLocalStorageAndState();
 		gameJoined = joinGameById(id).then(() => {
 			$boardSize = size;
 			$currentGameId = id;

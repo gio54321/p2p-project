@@ -18,6 +18,7 @@
 	import { web3 } from 'svelte-web3';
 
 	import { computeMerkleRoot, generateBoardValue, generateCommitment } from '$lib/js/merkleProofs';
+	import { get } from 'svelte/store';
 
 	let commitAmount = '0';
 
@@ -35,6 +36,7 @@
 		currentlySelectedShip >= 0 ? $allowedShips[currentlySelectedShip].length : 1;
 	let currentShipOrientation = 0;
 	$: gridValues = $boardValues;
+	$: boardSizeLocal = $boardSize;
 
 	function handleClick(index: number) {
 		let x = index % $boardSize;
@@ -129,7 +131,7 @@
 			<div class="flex justify-center">
 				<div
 					class="mr-10 flex flex-wrap justify-between"
-					style="width: {$boardSize * 4 + 3}rem; height: {$boardSize * 4 + 3}rem;"
+					style="width: {boardSizeLocal * 4 + 3}rem; height: {boardSizeLocal * 4 + 3}rem;"
 				>
 					{#each gridBlocks as id, index}
 						<button
