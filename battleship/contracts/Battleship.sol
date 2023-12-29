@@ -22,6 +22,7 @@ struct PlayerStateStruct {
     bytes32 committedBoardRoot;
     uint256 committedAmount;
     uint16 sunkShips;
+    bool boardRevealed;
 }
 
 struct GameStateStruct {
@@ -35,6 +36,13 @@ struct GameStateStruct {
     // 2 -> player 2
     uint8 winner;
     int256 createdPtr;
+}
+
+struct ShipPlacementStruct {
+    uint16 x;
+    uint16 y;
+    uint16 length;
+    bool direction; // true -> horizontal, false -> vertical
 }
 
 contract Battleship {
@@ -146,15 +154,15 @@ contract Battleship {
             GameStateStruct(
                 boardSize,
                 GamePhaseEnum.CREATED,
-                PlayerStateStruct(msg.sender, "", 0, 0),
-                PlayerStateStruct(address(0), "", 0, 0),
+                PlayerStateStruct(msg.sender, "", 0, 0, false),
+                PlayerStateStruct(address(0), "", 0, 0, false),
                 CellGuessStruct(0, 0),
                 0,
                 -1
             )
         );
 
-        // insert this game in the created games linked list
+        // insert this game in the created games
         insertIntoCreatedGames(id);
 
         // emit the GameCreated event with the newly created game's id
@@ -210,7 +218,13 @@ contract Battleship {
 
         // store second player information
         games[gameId].gamePhase = GamePhaseEnum.WAITING_COMMITMENT;
-        games[gameId].playerState2 = PlayerStateStruct(player2, "", 0, 0);
+        games[gameId].playerState2 = PlayerStateStruct(
+            player2,
+            "",
+            0,
+            0,
+            false
+        );
 
         emit GameReady(player2, gameId);
     }
@@ -493,7 +507,11 @@ contract Battleship {
         }
     }
 
-    function revealBoard(uint256 gameId, bytes32[] calldata board) public {
+    function revealBoard(
+        uint256 gameId,
+        bytes32[] calldata board,
+        ShipPlacementStruct[] calldata ships
+    ) public {
         // check gameId
         require(gameId < games.length, "Game does not exists");
         GameStateStruct memory game = games[gameId];
@@ -503,14 +521,8 @@ contract Battleship {
             "Operation not supported for the current game state"
         );
 
-        // check sender is consistent with phase
-        if (game.gamePhase == GamePhaseEnum.WAITING_BOARD_REVEAL) {
-            require(
-                msg.sender == game.playerState1.playerAddress ||
-                    msg.sender == game.playerState2.playerAddress,
-                "Only the correct player can reveal a value"
-            );
-        }
+        // this should never be false
+        require(game.winner != 0, "No winner has been declared yet");
 
         // check board size
         require(
@@ -529,12 +541,109 @@ contract Battleship {
                 computedRoot == game.playerState1.committedBoardRoot,
                 "Merkle root is not correct"
             );
+            require(
+                checkShipPlacement(game.boardSize, board, ships),
+                "Incorrect ship placement"
+            );
+            game.playerState1.boardRevealed = true;
         } else {
             require(
                 computedRoot == game.playerState2.committedBoardRoot,
                 "Merkle root is not correct"
             );
+            require(
+                checkShipPlacement(game.boardSize, board, ships),
+                "Incorrect ship placement"
+            );
+            game.playerState2.boardRevealed = true;
         }
+
+        if (
+            game.playerState1.boardRevealed && game.playerState2.boardRevealed
+        ) {
+            game.gamePhase = GamePhaseEnum.FINISHED;
+        }
+
+        games[gameId] = game;
+    }
+
+    function checkShipPlacement(
+        uint16 boardSize,
+        bytes32[] calldata board,
+        ShipPlacementStruct[] calldata ships
+    ) public pure returns (bool) {
+        // check board size
+        require(boardSize == 8 || boardSize == 4, "Incorrect board size");
+        require(board.length == boardSize * boardSize, "Incorrect board size");
+
+        // check ship lengths, must be provided by the caller in decreasing order
+        // for the check to pass
+        if (boardSize == 8) {
+            if (ships.length != 5) {
+                return false;
+            }
+
+            if (
+                ships[0].length != 5 ||
+                ships[1].length != 4 ||
+                ships[2].length != 3 ||
+                ships[3].length != 3 ||
+                ships[4].length != 2
+            ) {
+                return false;
+            }
+        } else {
+            if (ships.length != 3) {
+                return false;
+            }
+            if (
+                ships[0].length != 3 ||
+                ships[1].length != 2 ||
+                ships[2].length != 2
+            ) {
+                return false;
+            }
+        }
+
+        // check that the ships are valid in the board
+        // and there are no overlapping ships
+        bool[] memory newBoard = new bool[](boardSize * boardSize);
+        for (uint256 i = 0; i < ships.length; ++i) {
+            ShipPlacementStruct memory ship = ships[i];
+            if (ship.direction) {
+                // horizontal
+                if (ship.x + ship.length > boardSize) {
+                    return false;
+                }
+                for (uint256 j = 0; j < ship.length; ++j) {
+                    if (newBoard[ship.y * boardSize + ship.x + j]) {
+                        return false;
+                    }
+                    newBoard[ship.y * boardSize + ship.x + j] = true;
+                }
+            } else {
+                // vertical
+                if (ship.y + ship.length > boardSize) {
+                    return false;
+                }
+                for (uint256 j = 0; j < ship.length; ++j) {
+                    if (newBoard[(ship.y + j) * boardSize + ship.x]) {
+                        return false;
+                    }
+                    newBoard[(ship.y + j) * boardSize + ship.x] = true;
+                }
+            }
+        }
+
+        // check that the board is the same
+        for (uint256 i = 0; i < boardSize * boardSize; ++i) {
+            bool boardValue = uint8(uint256(board[i]) % 256) == 1;
+            if (boardValue && !newBoard[i]) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     function accuseIdle(uint256 gameId) public {
