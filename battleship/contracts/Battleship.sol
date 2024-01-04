@@ -9,6 +9,7 @@ enum GamePhaseEnum {
     WAITING_PLAYER_2_GUESS,
     WAITING_PLAYER_1_VALUE,
     WAITING_BOARD_REVEAL,
+    WAITING_WINNINGS_CLAIM,
     FINISHED
 }
 
@@ -36,6 +37,8 @@ struct GameStateStruct {
     // 2 -> player 2
     uint8 winner;
     int256 createdPtr;
+    address accuser;
+    uint currentAccusationBlockNumber;
 }
 
 struct ShipPlacementStruct {
@@ -54,9 +57,11 @@ contract Battleship {
         uint256 gameId,
         uint16 x,
         uint16 y,
-        uint16 playerNumber,
+        uint8 playerNumber,
         bool value
     );
+    event IdleAccusation(uint256 gameId, address accusedPlayer);
+    event AccusationResolved(uint256 gameId);
 
     // Array of all the games
     GameStateStruct[] games;
@@ -158,7 +163,9 @@ contract Battleship {
                 PlayerStateStruct(address(0), "", 0, 0, false),
                 CellGuessStruct(0, 0),
                 0,
-                -1
+                -1,
+                address(0),
+                0
             )
         );
 
@@ -250,6 +257,8 @@ contract Battleship {
             "You have to commit some wei to participate to the game"
         );
 
+        resolveAccusationIfPresent(gameId);
+
         bool bothPlayersCommitted = false;
 
         if (msg.sender == games[gameId].playerState1.playerAddress) {
@@ -283,8 +292,13 @@ contract Battleship {
         }
 
         if (bothPlayersCommitted) {
-            // TODO some kind of randomization to who starts?
-            games[gameId].gamePhase = GamePhaseEnum.WAITING_PLAYER_1_GUESS;
+            // choose first player at random
+            uint256 firstPlayer = getRandomValue(2);
+            if (firstPlayer == 0) {
+                games[gameId].gamePhase = GamePhaseEnum.WAITING_PLAYER_1_GUESS;
+            } else {
+                games[gameId].gamePhase = GamePhaseEnum.WAITING_PLAYER_2_GUESS;
+            }
             emit GameStarted(gameId);
         }
     }
@@ -299,6 +313,8 @@ contract Battleship {
                 game.gamePhase == GamePhaseEnum.WAITING_PLAYER_2_GUESS,
             "Operation not supported for the current game state"
         );
+
+        resolveAccusationIfPresent(gameId);
 
         // check coordinate bounds
         require(x < game.boardSize, "x must be in the board's bounds");
@@ -334,6 +350,8 @@ contract Battleship {
         bytes32 inputData,
         bytes32[] calldata merkleProof
     ) public pure returns (bytes32) {
+        require(boardSize == 8 || boardSize == 4, "Incorrect board size");
+
         uint16 boardSizeLog = log2(uint16(boardSize * boardSize));
         require(boardSizeLog != 0, "Incorrect board size");
         require(merkleProof.length == boardSizeLog, "Incorrect proof length");
@@ -397,6 +415,9 @@ contract Battleship {
     ) public {
         // check gameId
         require(gameId < games.length, "Game does not exists");
+
+        resolveAccusationIfPresent(gameId);
+
         GameStateStruct memory game = games[gameId];
 
         require(
@@ -464,7 +485,7 @@ contract Battleship {
                 "Merkle proof is not correct"
             );
             if (cellValue == 1) {
-                game.playerState1.sunkShips += 1;
+                game.playerState2.sunkShips += 1;
             }
             if (
                 game.playerState2.sunkShips ==
@@ -477,29 +498,26 @@ contract Battleship {
             }
         }
 
-        // TODO refactora sta cosa pls
-        // io del futuro: no
-        // terza volta che vedo sto todo: no
         games[gameId] = game;
 
         emit GamePhaseChanged(gameId);
 
-        uint16 playerNumber = getPlayerGameNumber(gameId, msg.sender);
+        uint8 playerNumber = getPlayerGameNumber(gameId, msg.sender);
         emit BoardValueRevealed(gameId, x, y, playerNumber, cellValue == 1);
     }
 
     function getNumberOfOccupiedCells(
         uint16 boardSize
     ) public pure returns (uint16) {
-        // testing
-        // TODO: remove
-        return 1;
         require(
             boardSize == 8 || boardSize == 4,
             "Supported board sizes are 4 and 8"
         );
+        // TODO remove
+        return 1;
+
         if (boardSize == 8) {
-            // 5 + 4 + 3 + 3 + 2 + 2 = 19
+            // 5 + 4 + 3 + 3 + 2 = 17
             return 17;
         } else {
             // 3 + 2 + 2 = 7
@@ -523,6 +541,8 @@ contract Battleship {
 
         // this should never be false
         require(game.winner != 0, "No winner has been declared yet");
+
+        resolveAccusationIfPresent(gameId);
 
         // check board size
         require(
@@ -561,7 +581,8 @@ contract Battleship {
         if (
             game.playerState1.boardRevealed && game.playerState2.boardRevealed
         ) {
-            game.gamePhase = GamePhaseEnum.FINISHED;
+            game.gamePhase = GamePhaseEnum.WAITING_WINNINGS_CLAIM;
+            emit GamePhaseChanged(gameId);
         }
 
         games[gameId] = game;
@@ -648,23 +669,108 @@ contract Battleship {
 
     function accuseIdle(uint256 gameId) public {
         // check game state
+        require(gameId < games.length, "Game does not exists");
+        require(
+            games[gameId].accuser == address(0),
+            "An accusation is already present"
+        );
+
+        GamePhaseEnum phase = games[gameId].gamePhase;
+
+        // the player can accuse only if it is currently waiting for the other player
+        // to perform an action, this is:
+        // - guess a cell
+        // - reveal a value
+        // - commit a board and the accusing player has already committed a board
+        // - reveal a board and the accusing player has already revealed a board
+        if (msg.sender == games[gameId].playerState1.playerAddress) {
+            require(
+                phase == GamePhaseEnum.WAITING_PLAYER_2_GUESS ||
+                    phase == GamePhaseEnum.WAITING_PLAYER_2_VALUE ||
+                    (phase == GamePhaseEnum.WAITING_BOARD_REVEAL &&
+                        games[gameId].playerState1.boardRevealed) ||
+                    (phase == GamePhaseEnum.WAITING_COMMITMENT &&
+                        games[gameId].playerState1.committedAmount > 0),
+                "You cannot accuse the other player at this time"
+            );
+        } else {
+            require(
+                phase == GamePhaseEnum.WAITING_PLAYER_1_GUESS ||
+                    phase == GamePhaseEnum.WAITING_PLAYER_1_VALUE ||
+                    (phase == GamePhaseEnum.WAITING_BOARD_REVEAL &&
+                        games[gameId].playerState2.boardRevealed) ||
+                    (phase == GamePhaseEnum.WAITING_COMMITMENT &&
+                        games[gameId].playerState2.committedAmount > 0),
+                "You cannot accuse the other player at this time"
+            );
+        }
+
+        // store accusation
+        games[gameId].accuser = msg.sender;
+        games[gameId].currentAccusationBlockNumber = block.number;
+
         // emit event
+        address accusedPlayer;
+        if (msg.sender == games[gameId].playerState1.playerAddress) {
+            accusedPlayer = games[gameId].playerState2.playerAddress;
+        } else {
+            accusedPlayer = games[gameId].playerState1.playerAddress;
+        }
+        emit IdleAccusation(gameId, accusedPlayer);
+    }
+
+    function resolveAccusationIfPresent(uint256 gameId) private {
+        // check game state
+        require(gameId < games.length, "Game does not exists");
+        if (games[gameId].accuser != address(0)) {
+            games[gameId].accuser = address(0);
+            games[gameId].currentAccusationBlockNumber = 0;
+        }
+    }
+
+    function claimAccusationReward(uint256 gameId) public {
+        // check game state
+        require(gameId < games.length, "Game does not exists");
+        require(
+            games[gameId].accuser != address(0),
+            "There is no accusation to claim"
+        );
+        require(
+            games[gameId].gamePhase != GamePhaseEnum.FINISHED,
+            "Game is finished"
+        );
+        require(
+            msg.sender == games[gameId].accuser,
+            "Only the accuser can claim the reward"
+        );
+
+        if (block.number - games[gameId].currentAccusationBlockNumber > 5) {
+            games[gameId].gamePhase = GamePhaseEnum.FINISHED;
+            games[gameId].winner = getPlayerGameNumber(gameId, msg.sender);
+            payable(msg.sender).transfer(
+                games[gameId].playerState1.committedAmount +
+                    games[gameId].playerState2.committedAmount
+            );
+            emit GamePhaseChanged(gameId);
+        }
     }
 
     function claimWinningReward(uint256 gameId) public {
         // check game state
         require(
-            games[gameId].gamePhase == GamePhaseEnum.FINISHED,
+            games[gameId].gamePhase == GamePhaseEnum.WAITING_WINNINGS_CLAIM,
             "Game is not finished yet"
         );
         require(
             games[gameId].winner == getPlayerGameNumber(gameId, msg.sender),
             "You are not the winner of this game"
         );
+        games[gameId].gamePhase = GamePhaseEnum.FINISHED;
         payable(msg.sender).transfer(
             games[gameId].playerState1.committedAmount +
                 games[gameId].playerState2.committedAmount
         );
+        emit GamePhaseChanged(gameId);
     }
 
     function getGamePhase(uint256 gameId) public view returns (string memory) {
@@ -684,6 +790,8 @@ contract Battleship {
             return "WAITING_PLAYER_2_VALUE";
         } else if (gamePhase == GamePhaseEnum.WAITING_BOARD_REVEAL) {
             return "WAITING_BOARD_REVEAL";
+        } else if (gamePhase == GamePhaseEnum.WAITING_WINNINGS_CLAIM) {
+            return "WAITING_WINNINGS_CLAIM";
         } else if (gamePhase == GamePhaseEnum.FINISHED) {
             return "FINISHED";
         } else {
@@ -722,7 +830,7 @@ contract Battleship {
     function getPlayerGameNumber(
         uint256 gameId,
         address player
-    ) public view returns (uint16) {
+    ) public view returns (uint8) {
         require(gameId < games.length, "Game does not exists");
         if (player == games[gameId].playerState1.playerAddress) {
             return 1;

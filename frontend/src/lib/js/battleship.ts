@@ -1,9 +1,10 @@
 import {
     defaultEvmStores,
     selectedAccount,
-    web3
+    web3,
+    connected as connected_web3,
 } from 'svelte-web3';
-import { derived, get, writable, type Writable } from 'svelte/store';
+import { derived, get, writable, type Readable, type Writable } from 'svelte/store';
 import { toast } from '@zerodevx/svelte-toast'
 import BattleshipContract from '$lib/contracts/Battleship.json';
 import { computeMerkleProof, computeMerkleRoot, generateBoardValue, generateCommitment } from './merkleProofs';
@@ -68,6 +69,7 @@ export enum GameStateEnum {
     WaitingGuessing,
     WaitingRevealing,
     BoardReveal,
+    WaitingWinningClaim,
     Finished,
 }
 
@@ -89,6 +91,8 @@ export function getGameStateString(state: GameStateEnum): string {
             return "Waiting for other player to reveal the cell";
         case GameStateEnum.BoardReveal:
             return "Game finished, you need to reveal the board";
+        case GameStateEnum.WaitingWinningClaim:
+            return "Waiting for the winner to claim the winnings";
         case GameStateEnum.Finished:
             return "Finished";
     }
@@ -101,6 +105,9 @@ export async function getGamePhase(): Promise<any> {
     }
     let battleship = get(battleshipInstance);
     let gameId = get(currentGameId);
+    if (gameId === null) {
+        return null;
+    }
     let gameState = await battleship.methods.getGamePhase(gameId).call();
     return gameState;
 }
@@ -111,9 +118,25 @@ async function getPlayerNumber(): Promise<any> {
     }
     let battleship = get(battleshipInstance);
     let gameId = get(currentGameId);
+    if (gameId === null) {
+        return null;
+    }
     let address = get(selectedAccount);
     let playerNumber = await battleship.methods.getPlayerGameNumber(gameId, address).call();
     return playerNumber;
+}
+
+async function getWinner(): Promise<any> {
+    if (!get(connected)) {
+        return null;
+    }
+    let battleship = get(battleshipInstance);
+    let gameId = get(currentGameId);
+    if (gameId === null) {
+        return null;
+    }
+    let winner = await battleship.methods.getWinner(gameId).call();
+    return winner;
 }
 
 export async function refreshGameState() {
@@ -139,8 +162,17 @@ export async function refreshGameState() {
         gameState.set(GameStateEnum.WaitingRevealing);
     } else if (gamePhase === `WAITING_BOARD_REVEAL`) {
         gameState.set(GameStateEnum.BoardReveal);
+    } else if (gamePhase === `WAITING_WINNINGS_CLAIM`) {
+        gameState.set(GameStateEnum.WaitingWinningClaim);
     } else if (gamePhase === `FINISHED`) {
         gameState.set(GameStateEnum.Finished);
+    }
+
+    let winner = await getWinner();
+    if (winner.toString() !== "0") {
+        gameWinner.set(winner.toString() === myPlayerNumber);
+    } else {
+        gameWinner.set(null);
     }
 }
 
@@ -190,7 +222,30 @@ function createShips() {
             update((arr) => {
                 return Array(get(allowedShips).length).fill(null);
             });
-        }
+        },
+        toContractStructs: () => {
+            let ships = get(boardShips);
+            let result = [];
+            for (let i in ships) {
+                let ship = ships[i];
+                if (ship === null) {
+                    return null;
+                }
+                let x = ship.pos % get(boardSize);
+                let y = Math.floor(ship.pos / get(boardSize));
+                let length = get(allowedShips)[i].length;
+                let direction = ship.isHorizontal;
+                result.push({
+                    'x': x,
+                    'y': y,
+                    'length': length,
+                    'direction': direction === 0
+                });
+            }
+            // sort resut by length descending
+            result.sort((a, b) => a.length < b.length ? 1 : -1);
+            return result;
+        },
     };
 }
 
@@ -214,13 +269,23 @@ export const boardValues = derived(boardShips, (ships) => {
     return board;
 });
 
-export const connected = derived(selectedAccount, ($a) => $a !== undefined);
+// export const connected = derived(selectedAccount, ($a) => $a !== undefined);
+export const connected = connected_web3;
 
 // saved in local storage
 export const currentGameId: Writable<null | number> = writable(null);
 export const boardValuesNonces: Writable<string[]> = writable([]);
 export const opponentBoardValues: Writable<(0 | 1 | null)[]> = writable([]);
 export const boardValuesRevealed: Writable<boolean[]> = writable([]);
+export const createdGames: Writable<any[]> = writable([]);
+export const gameReady: Writable<boolean> = writable(false);
+export const gameStarted: Writable<boolean> = writable(false);
+
+// 0 is no accusation, 1 current player is accused, -1 current player is accuser
+export const currentAccusation: Writable<number> = writable(0);
+
+// null if no winner yet, true if the player won, false if the player lost
+export const gameWinner: Writable<null | boolean> = writable(null);
 
 export function loadGameFromLocalStorage() {
     let utils = get(web3).utils;
@@ -283,6 +348,8 @@ export function clearLocalStorageAndState() {
     boardShips.clear();
     opponentBoardValues.set([]);
     boardValuesRevealed.set([]);
+    gameReady.set(false);
+    gameStarted.set(false);
     // NOTE: do not clear boardSize and currentGameId
 }
 
@@ -295,60 +362,127 @@ export function disconnectProvider() {
     toast.push("Account disconnected");
 }
 
-let subscriptionGamePhaseGhanged = '';
-let subscriptionBoardValueRevealed = '';
+let subscriptions: any = {};
+let lastEvent: any = {
+    'GameStarted': null,
+    'GamePhaseChanged': null,
+    'BoardValueRevealed': null,
+    'GameCreated': null,
+    'GameReady': null,
+    'IdleAccusation': null,
+};
 
-export let battleshipInstance = derived(connected, (connected) => {
+function subscribeToEvent(contract: any, event: string, callback: (data: any) => void) {
+    if (event in subscriptions) {
+        console.log('already subscribed to event', event);
+        return;
+    }
+    console.log('subscribing to event', event);
+    contract.events[event]()
+        .on('connected', (subscriptionId: string) => {
+            subscriptions[event] = subscriptionId;
+        })
+    contract.events[event]().on('data', (data: any) => {
+        console.log(event, 'event');
+
+        // ensure that the event is not duplicated
+        if (lastEvent[event] === data.transactionHash) {
+            return;
+        }
+        lastEvent[event] = data.transactionHash;
+        callback(data);
+    });
+}
+
+export let battleshipInstance: Readable<any> = derived(connected, (connected) => {
     if (connected) {
         let web3Instance = get(web3);
         let address = BattleshipContract.networks["5777"].address;
+
+        // if the instance is already created, just return it
+        if (get(battleshipInstance) !== null && get(battleshipInstance) !== undefined) {
+            return get(battleshipInstance);
+        }
+
         let contract = new web3Instance.eth.Contract(BattleshipContract.abi, address);
 
-        console.log('installing event listeners');
-        console.log(contract.events);
-        console.log(contract.events.GamePhaseChanged());
+        console.log('installing event listeners', subscriptions);
         // install event listeners
-        if (subscriptionGamePhaseGhanged === '') {
-            contract.events.GamePhaseChanged()
-                .on('connected', (subscriptionId: string) => {
-                    subscriptionGamePhaseGhanged = subscriptionId;
-                })
-            contract.events.GamePhaseChanged().on('data', () => {
-                console.log('game phase changed event');
-                refreshGameState();
-                saveGameToLocalStorage();
-            });
-        }
 
-        if (subscriptionBoardValueRevealed === '') {
-            contract.events.BoardValueRevealed()
-                .on('connected', (subscriptionId: string) => {
-                    subscriptionBoardValueRevealed = subscriptionId;
-                });
-            contract.events.BoardValueRevealed().on('data', async (data: any) => {
-                console.log('board value revealed event');
-                console.log(data);
-                if (data.returnValues.gameId.toString() !== get(currentGameId)?.toString()) {
-                    return;
-                }
+        subscribeToEvent(contract, 'GameCreated', (data: any) => {
+            console.log('game created event callback');
+            console.log(data);
+            console.log(get(battleshipInstance));
+            refreshCreatedGames();
+        });
 
-                let playerNumber = await getPlayerNumber();
-                let size = get(boardSize);
-                if (data.returnValues.playerNumber.toString() === playerNumber.toString()) {
-                    let index = parseInt(data.returnValues.x) + parseInt(data.returnValues.y) * size;
-                    let revealed = get(boardValuesRevealed);
-                    revealed[index] = true;
-                    boardValuesRevealed.set(revealed);
+        subscribeToEvent(contract, 'GameStarted', (data: any) => {
+            console.log(data);
+            if (data.returnValues.id.toString() === get(currentGameId)?.toString()) {
+                gameStarted.set(true);
+            }
+        });
+
+        subscribeToEvent(contract, 'GamePhaseChanged', (data: any) => {
+            refreshGameState();
+            saveGameToLocalStorage();
+        });
+
+        subscribeToEvent(contract, 'BoardValueRevealed', (data: any) => {
+            console.log('board value revealed event');
+            console.log(data);
+            if (data.returnValues.gameId.toString() !== get(currentGameId)?.toString()) {
+                return;
+            }
+
+            let playerNumber = getPlayerNumber();
+            let size = get(boardSize);
+            if (data.returnValues.playerNumber.toString() === playerNumber.toString()) {
+                let index = parseInt(data.returnValues.x) + parseInt(data.returnValues.y) * size;
+                let revealed = get(boardValuesRevealed);
+                revealed[index] = true;
+                boardValuesRevealed.set(revealed);
+            } else {
+                let index = parseInt(data.returnValues.x) + parseInt(data.returnValues.y) * size;
+                let opponentBoard = get(opponentBoardValues);
+                let value: (0 | 1) = data.returnValues.value ? 1 : 0;
+                opponentBoard[index] = value;
+                opponentBoardValues.set(opponentBoard);
+            }
+            saveGameToLocalStorage();
+        });
+
+
+
+        subscribeToEvent(contract, 'GameReady', (data: any) => {
+            console.log('game ready event');
+            console.log(data);
+            refreshCreatedGames();
+            if (data.returnValues.id.toString() === get(currentGameId)?.toString()) {
+                gameReady.set(true);
+            }
+        });
+
+        subscribeToEvent(contract, 'IdleAccusation', (data: any) => {
+            console.log('accuse idle event');
+            console.log(data);
+            if (data.returnValues.gameId.toString() === get(currentGameId)?.toString()) {
+                if (data.returnValues.accusedPlayer.toString().toLowerCase() === get(selectedAccount)?.toString().toLowerCase()) {
+                    currentAccusation.set(1);
                 } else {
-                    let index = parseInt(data.returnValues.x) + parseInt(data.returnValues.y) * size;
-                    let opponentBoard = get(opponentBoardValues);
-                    let value: (0 | 1) = data.returnValues.value ? 1 : 0;
-                    opponentBoard[index] = value;
-                    opponentBoardValues.set(opponentBoard);
+                    currentAccusation.set(-1);
                 }
-                saveGameToLocalStorage();
-            });
-        }
+            }
+        });
+
+        subscribeToEvent(contract, 'AccusationResolved', (data: any) => {
+            console.log('accusation resolved event');
+            console.log(data);
+            if (data.returnValues.gameId.toString() === get(currentGameId)?.toString()) {
+                currentAccusation.set(0);
+                toast.push("Accusation resolved");
+            }
+        });
         return contract;
     } else {
         return null;
@@ -393,6 +527,32 @@ export async function joinGameById(id: any): Promise<any> {
     return null;
 }
 
+export async function joinRandomGame(): Promise<any> {
+    if (!get(connected)) {
+        return null;
+    }
+    let battleship = get(battleshipInstance);
+    let joinTx = await battleship.methods.joinRandomGame().send({ from: get(selectedAccount) });
+    let events = await battleship.getPastEvents('GameReady', {
+        fromBlock: joinTx.blockNumber,
+    });
+    for (let e of events) {
+        if (e.returnValues.player2.toLowerCase() === get(selectedAccount)?.toLowerCase()) {
+            return events[0].returnValues.id;
+        }
+    }
+    return null;
+}
+
+export async function getBoardSize(gameId: any): Promise<any> {
+    if (!get(connected)) {
+        return null;
+    }
+    let battleship = get(battleshipInstance);
+    let boardSize = await battleship.methods.getBoardSize(gameId).call();
+    return boardSize;
+}
+
 export async function getCreatedGames(): Promise<any[]> {
     if (!get(connected)) {
         return [];
@@ -409,12 +569,21 @@ export async function getCreatedGames(): Promise<any[]> {
     return result;
 }
 
+export async function refreshCreatedGames() {
+    let games = await getCreatedGames();
+    createdGames.set(games);
+}
+
+
 export async function commitBoard(commitAmount: any): Promise<any> {
     if (!get(connected)) {
         return null;
     }
     let battleship = get(battleshipInstance);
     let gameId = get(currentGameId);
+    if (gameId === null) {
+        return null;
+    }
     let nonces = get(boardValues).map((v: 0 | 1) => generateBoardValue(v));
     boardValuesNonces.set(nonces);
     let commitments = nonces.map((nonce) => generateCommitment(nonce));
@@ -432,6 +601,9 @@ export async function guessCell(x: number, y: number): Promise<any> {
     }
     let battleship = get(battleshipInstance);
     let gameId = get(currentGameId);
+    if (gameId === null) {
+        return null;
+    }
     let guessTx = await battleship.methods.guessCell(gameId, x, y).send({ from: get(selectedAccount) });
     return guessTx;
 }
@@ -442,6 +614,9 @@ export async function revealValue(): Promise<any> {
     }
     let battleship = get(battleshipInstance);
     let gameId = get(currentGameId);
+    if (gameId === null) {
+        return null;
+    }
     let guess = await getCurrentGuess();
     console.log(guess);
 
@@ -468,6 +643,74 @@ async function getCurrentGuess(): Promise<any> {
     }
     let battleship = get(battleshipInstance);
     let gameId = get(currentGameId);
+    if (gameId === null) {
+        return null;
+    }
     let guess = await battleship.methods.getCurrentGuess(gameId).call();
     return guess;
+}
+
+export async function checkShipPlacement(): Promise<boolean> {
+    if (!get(connected)) {
+        return false;
+    }
+    let battleship = get(battleshipInstance);
+    let ships = boardShips.toContractStructs();
+    let nonces = get(boardValuesNonces);
+    let result = await battleship.methods.checkShipPlacement(get(boardSize), nonces, ships).call();
+    return result;
+}
+
+export async function revealBoard(): Promise<any> {
+    if (!get(connected)) {
+        return null;
+    }
+    let battleship = get(battleshipInstance);
+    let gameId = get(currentGameId);
+    if (gameId === null) {
+        return null;
+    }
+    let nonces = get(boardValuesNonces);
+    let ships = boardShips.toContractStructs();
+    let revealTx = await battleship.methods.revealBoard(gameId, nonces, ships).send({ from: get(selectedAccount) });
+    return revealTx;
+}
+
+export async function claimWinningReward(): Promise<any> {
+    if (!get(connected)) {
+        return null;
+    }
+    let battleship = get(battleshipInstance);
+    let gameId = get(currentGameId);
+    if (gameId === null) {
+        return null;
+    }
+    let claimTx = await battleship.methods.claimWinningReward(gameId).send({ from: get(selectedAccount) });
+    console.log(claimTx);
+    return claimTx;
+}
+
+export async function accuseIdle(): Promise<any> {
+    if (!get(connected)) {
+        return null;
+    }
+    let battleship = get(battleshipInstance);
+    let gameId = get(currentGameId);
+    if (gameId === null) {
+        return null;
+    }
+    let claimTx = await battleship.methods.accuseIdle(gameId).send({ from: get(selectedAccount) });
+    console.log(claimTx);
+    return claimTx;
+}
+
+export async function claimAccusationReward(): Promise<any> {
+    if (!get(connected)) {
+        return null;
+    }
+    let battleship = get(battleshipInstance);
+    let gameId = get(currentGameId);
+    let claimTx = await battleship.methods.claimAccusationReward(gameId).send({ from: get(selectedAccount) });
+    console.log(claimTx);
+    return claimTx;
 }

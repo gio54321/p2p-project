@@ -9,7 +9,10 @@
 		boardShips,
 		currentGameId,
 		saveGameToLocalStorage,
-		clearLocalStorageAndState
+		clearLocalStorageAndState,
+		gameStarted,
+		gameState,
+		GameStateEnum
 	} from '$lib/js/battleship';
 	import { Trash } from 'svelte-heros-v2';
 	import { Button, Kbd, Input, Label, NumberInput } from 'flowbite-svelte';
@@ -19,6 +22,12 @@
 
 	import { computeMerkleRoot, generateBoardValue, generateCommitment } from '$lib/js/merkleProofs';
 	import { get } from 'svelte/store';
+	import { onMount } from 'svelte';
+	import AccusationCard from '$lib/components/AccusationCard.svelte';
+
+	onMount(async () => {
+		clearLocalStorageAndState();
+	});
 
 	let commitAmount = '0';
 
@@ -107,23 +116,24 @@
 		commit = commitBoard(commitAmountWei);
 	}
 
-	let eventHandlersRegistered = false;
-	$: if ($battleshipInstance !== null && !eventHandlersRegistered) {
-		$battleshipInstance.events.GameStarted().on('data', (data: any) => {
-			console.log(data);
-			if (data.returnValues.id == $currentGameId) {
-				toast.push('Game started');
-				saveGameToLocalStorage();
-				goto('/play');
-			}
-		});
-		eventHandlersRegistered = true;
+	$: if ($gameState === GameStateEnum.Finished) {
+		// game is aborted, show winning page
+		goto('/play');
+	}
+
+	$: if ($gameStarted) {
+		toast.push('Game started');
+		saveGameToLocalStorage();
+		goto('/play');
 	}
 </script>
 
 <div class="mt-16 w-full">
 	<div class="flex items-center justify-center">
 		<div class="mx-14 w-full xl:mx-0">
+			<div class="items-right flex justify-end">
+				<AccusationCard />
+			</div>
 			<div class="mb-10 flex items-center justify-center py-3">
 				<div class="font-semibold">Choose the ships placement and commit the board</div>
 			</div>

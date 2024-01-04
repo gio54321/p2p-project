@@ -18,7 +18,12 @@
 		joinGameById,
 		currentGameId,
 		clearLocalStorageAndState,
-		boardSize
+		boardSize,
+		createdGames,
+		gameReady,
+		refreshCreatedGames,
+		joinRandomGame,
+		getBoardSize
 	} from '$lib/js/battleship';
 	import { toast } from '@zerodevx/svelte-toast';
 	import { goto } from '$app/navigation';
@@ -50,28 +55,29 @@
 		});
 	}
 
-	let createdGamesList: Promise<any[]> = Promise.resolve([]);
-	let showCreatedGames = false;
-	$: if ($connected) {
-		createdGamesList = getCreatedGames();
+	function joinRandomGameLocal() {
+		if (!$connected) {
+			toast.push('Not connected');
+			return;
+		}
+		clearLocalStorageAndState();
+		gameJoined = joinRandomGame().then(async (id) => {
+			toast.push(`Joined game ${id}`);
+			let size = await getBoardSize(id);
+			$boardSize = parseInt(size.toString());
+			$currentGameId = id;
+			goto('/commit-board');
+		});
 	}
 
-	let eventHandlersRegistered = false;
-	$: if ($battleshipInstance !== null && !eventHandlersRegistered) {
-		$battleshipInstance.events.GameCreated().on('data', () => {
-			console.log('game created event');
-			createdGamesList = getCreatedGames();
-		});
-		$battleshipInstance.events.GameReady().on('data', (data: any) => {
-			createdGamesList = getCreatedGames();
-			console.log(data);
-			if (data.returnValues.id == $currentGameId) {
-				clearLocalStorageAndState();
-				toast.push('Second player joined');
-				goto('/commit-board');
-			}
-		});
-		eventHandlersRegistered = true;
+	let showCreatedGames = false;
+	$: if ($connected) {
+		refreshCreatedGames();
+	}
+
+	$: if ($gameReady) {
+		toast.push('Second player joined');
+		goto('/commit-board');
 	}
 </script>
 
@@ -105,7 +111,12 @@
 					<SearchSolid class="me-2 h-3 w-3" />
 					Join game by id
 				</Button>
-				<Button>
+				<Button
+					on:click={() => {
+						showCreatedGames = false;
+						joinRandomGameLocal();
+					}}
+				>
 					<ArrowRightSolid class="me-2 h-3 w-3" />
 					Join random game
 				</Button>
@@ -139,7 +150,7 @@
 		</div>
 	{/if}
 	{#if showCreatedGames}
-		{#await createdGamesList}
+		{#await $createdGames}
 			<p>...waiting</p>
 		{:then games}
 			<div class="my-16 flex items-center justify-center">
