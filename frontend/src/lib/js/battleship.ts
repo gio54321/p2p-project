@@ -353,12 +353,12 @@ export function clearLocalStorageAndState() {
     // NOTE: do not clear boardSize and currentGameId
 }
 
-export function connectProvider() {
-    defaultEvmStores.setProvider();
+export async function connectProvider() {
+    await defaultEvmStores.setProvider();
     toast.push("Successfully connected account");
 }
-export function disconnectProvider() {
-    defaultEvmStores.disconnect();
+export async function disconnectProvider() {
+    await defaultEvmStores.disconnect();
     toast.push("Account disconnected");
 }
 
