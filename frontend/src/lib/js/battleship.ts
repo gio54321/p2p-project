@@ -428,14 +428,14 @@ export let battleshipInstance: Readable<any> = derived(connected, (connected) =>
             saveGameToLocalStorage();
         });
 
-        subscribeToEvent(contract, 'BoardValueRevealed', (data: any) => {
+        subscribeToEvent(contract, 'BoardValueRevealed', async (data: any) => {
             console.log('board value revealed event');
             console.log(data);
             if (data.returnValues.gameId.toString() !== get(currentGameId)?.toString()) {
                 return;
             }
 
-            let playerNumber = getPlayerNumber();
+            let playerNumber = await getPlayerNumber();
             let size = get(boardSize);
             if (data.returnValues.playerNumber.toString() === playerNumber.toString()) {
                 let index = parseInt(data.returnValues.x) + parseInt(data.returnValues.y) * size;
