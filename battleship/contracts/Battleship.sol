@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity >=0.4.22 <0.9.0;
 
+// enumeration of all the possible game phases
 enum GamePhaseEnum {
     CREATED,
     WAITING_COMMITMENT,
@@ -13,11 +14,13 @@ enum GamePhaseEnum {
     FINISHED
 }
 
+// structure holding one cell guess
 struct CellGuessStruct {
     uint16 x;
     uint16 y;
 }
 
+// structure holding the state of a player
 struct PlayerStateStruct {
     address playerAddress;
     bytes32 committedBoardRoot;
@@ -26,6 +29,7 @@ struct PlayerStateStruct {
     bool boardRevealed;
 }
 
+// structure holding the state of a game
 struct GameStateStruct {
     uint16 boardSize;
     GamePhaseEnum gamePhase;
@@ -41,6 +45,9 @@ struct GameStateStruct {
     uint currentAccusationBlockNumber;
 }
 
+// Structure holding one ship placement. The ship is placed
+// starting from the x, y coordinates and going in the direction
+// specified by the direction field, for the length specified
 struct ShipPlacementStruct {
     uint16 x;
     uint16 y;
@@ -77,9 +84,9 @@ contract Battleship {
         randomCounter = 0;
     }
 
+    // Compute the log2 of a number
+    // if the number is not a power of 2, returns 0, else returns the log2 of the number
     function log2(uint16 x) private pure returns (uint16) {
-        // returns the log2 of x, rounded down
-        // if x is not a power of 2, returns 0
         uint16 result = 0;
         while (x > 1) {
             if (x % 2 != 0) {
@@ -91,20 +98,15 @@ contract Battleship {
         return result;
     }
 
+    // Returns a random value in the range [0, b) based on the previous block hash
+    // and the internal counter.
+    // Every time it is called the value will be different
     function getRandomValue(uint256 b) private returns (uint256) {
-        // returns a random value in the range [0, b)
-        // based on the previous block hash
-        // and the internal counter
-        // every time it is called the value will be different
-        //
-        // NOTE: this random generation can be biased for some choices of b
-        // because this function generates a uniform number in the range [0, 2^256-1]
-        // and then applies the modulo b operation.
-        // If for example b = 2^255 + 2^254 then the values in the range [0, 2^254-1] are
-        // twice as likely to be drawn w.r.t. the other values. For smaller choices of b, this effect
-        // is reduced and can be considered negligible.
-
+        // get the previous block's hash
         bytes32 blockHash = blockhash(block.number - 1);
+
+        // increment the counter, to make sure that each call to this function
+        // returns a different value
         randomCounter += 1;
         uint256 randValue = uint256(
             keccak256(
@@ -117,13 +119,14 @@ contract Battleship {
         return randValue % b;
     }
 
+    // Insert a game in the created games set
     function insertIntoCreatedGames(uint256 id) private {
         createdGames.push(id);
         games[id].createdPtr = int256(createdGames.length - 1);
     }
 
+    // remove the game corresponding to gameId from the created games set
     function removeFromCreatedGames(uint256 gameId) private {
-        // remove the game corresponding to gameId from the created games set
         require(
             games[gameId].createdPtr >= 0,
             "Game is not in the created games set"
@@ -132,10 +135,11 @@ contract Battleship {
 
         if (createdIndex == createdGames.length - 1) {
             // this is the last element, just pop it
-            // this handles also the case where the length is 1
+            // this branch handles also the case where the length is 1
             createdGames.pop();
         } else {
-            // remove this element from the created games
+            // in this branch the element to be removed is in the middle of the array
+            // so we remove this element from the created games,
             // swap the last element with this position
             // and update created pointer for that game
             uint256 newElement = createdGames[createdGames.length - 1];
@@ -145,6 +149,7 @@ contract Battleship {
         }
     }
 
+    // Create a new game with the specified board size
     function createGame(uint16 boardSize) public {
         require(
             boardSize == 8 || boardSize == 4,
@@ -154,7 +159,7 @@ contract Battleship {
         // cacluate the game's id
         uint256 id = games.length;
 
-        // create the game struct
+        // create the initial game structure
         games.push(
             GameStateStruct(
                 boardSize,
@@ -176,38 +181,20 @@ contract Battleship {
         emit GameCreated(msg.sender, id);
     }
 
+    // Join a random game chosen by the contract
     function joinRandomGame() public {
         require(createdGames.length > 0, "No currently available games");
+
+        // choose a random index in the createdGames array
         uint256 idx = getRandomValue(createdGames.length);
         uint256 gameId = createdGames[idx];
 
         // join the game by that id
-        joinGamePlayer2ById(gameId, msg.sender);
+        joinGameById(gameId);
     }
 
-    function getCreatedGamesIds() public view returns (uint256[] memory) {
-        return createdGames;
-    }
-
-    function getCreatedGamesOwners() public view returns (address[] memory) {
-        address[] memory result = new address[](createdGames.length);
-        for (uint i = 0; i < createdGames.length; ++i) {
-            result[i] = games[createdGames[i]].playerState1.playerAddress;
-        }
-        return result;
-    }
-
+    // Join a game by its id
     function joinGameById(uint256 gameId) public {
-        require(gameId < games.length, "Game with that id does not exists");
-        require(
-            games[gameId].gamePhase == GamePhaseEnum.CREATED,
-            "Game already started"
-        );
-        joinGamePlayer2ById(gameId, msg.sender);
-    }
-
-    function joinGamePlayer2ById(uint256 gameId, address player2) private {
-        // make a player join a game
         require(gameId < games.length, "Game with that id does not exists");
         require(
             games[gameId].gamePhase == GamePhaseEnum.CREATED,
@@ -226,21 +213,22 @@ contract Battleship {
         // store second player information
         games[gameId].gamePhase = GamePhaseEnum.WAITING_COMMITMENT;
         games[gameId].playerState2 = PlayerStateStruct(
-            player2,
+            msg.sender,
             "",
             0,
             0,
             false
         );
 
-        emit GameReady(player2, gameId);
+        emit GameReady(msg.sender, gameId);
     }
 
+    // Commit a board merkle tree root for the game with the specified id and some funds.
+    // Also, start the game if the other player has already committed.
     function commitBoard(
         uint256 gameId,
         bytes32 boardMerkleTreeRoot
     ) public payable {
-        // check gameId
         require(gameId < games.length, "Game does not exist");
         require(
             games[gameId].gamePhase == GamePhaseEnum.WAITING_COMMITMENT,
@@ -252,14 +240,18 @@ contract Battleship {
             "Only players of this game can commit"
         );
 
+        // check that the player has committed some funds
         require(
             msg.value > 0,
             "You have to commit some wei to participate to the game"
         );
 
+        // resolve any accusation if present
         resolveAccusationIfPresent(gameId);
 
         bool bothPlayersCommitted = false;
+
+        // store the commitment in the correct player state struct
 
         if (msg.sender == games[gameId].playerState1.playerAddress) {
             require(
@@ -292,19 +284,20 @@ contract Battleship {
         }
 
         if (bothPlayersCommitted) {
-            // choose first player at random
+            // choose first player at random by drawing a random number in [0, 2)
             uint256 firstPlayer = getRandomValue(2);
             if (firstPlayer == 0) {
                 games[gameId].gamePhase = GamePhaseEnum.WAITING_PLAYER_1_GUESS;
             } else {
                 games[gameId].gamePhase = GamePhaseEnum.WAITING_PLAYER_2_GUESS;
             }
+
             emit GameStarted(gameId);
         }
     }
 
+    // Guess a cell in the board at coordinates (x, y)
     function guessCell(uint256 gameId, uint16 x, uint16 y) public {
-        // check gameId
         require(gameId < games.length, "Game does not exists");
         GameStateStruct memory game = games[gameId];
 
@@ -314,6 +307,7 @@ contract Battleship {
             "Operation not supported for the current game state"
         );
 
+        // resolve any accusation if present
         resolveAccusationIfPresent(gameId);
 
         // check coordinate bounds
@@ -344,19 +338,29 @@ contract Battleship {
         emit GamePhaseChanged(gameId);
     }
 
+    // Compute the merkle root of a tree with the specified board size from the
+    // provided input data and merkle proof.
     function computeMerkleRootFromProof(
         uint256 boardSize,
         uint16 position,
         bytes32 inputData,
         bytes32[] calldata merkleProof
     ) public pure returns (bytes32) {
-        require(boardSize == 8 || boardSize == 4, "Incorrect board size");
+        require(
+            boardSize == 8 || boardSize == 4,
+            "Only 4x4 and 8x8 boards are supported"
+        );
 
+        // Merkle proof length has to be log2(boardSize * boardSize)
         uint16 boardSizeLog = log2(uint16(boardSize * boardSize));
         require(boardSizeLog != 0, "Incorrect board size");
         require(merkleProof.length == boardSizeLog, "Incorrect proof length");
 
+        // compute the first value commitment
         bytes32 currHash = keccak256(abi.encodePacked(inputData));
+
+        // navigate upwards the merkle tree, computing the hashes
+        // of the intermediate nodes up to the root
         bytes memory hashInput;
         for (uint256 i = 0; i < boardSizeLog; ++i) {
             if (position % 2 == 0) {
@@ -373,9 +377,13 @@ contract Battleship {
             currHash = keccak256(hashInput);
             position = position / 2; // rounds towards zero
         }
+
+        // the last computed hash is the root
         return currHash;
     }
 
+    // Compute the merkle root of a tree with the specified board size from the
+    // provided board.
     function computeMerkleRootFromBoard(
         uint16 boardSize,
         bytes32[] calldata board
@@ -389,10 +397,13 @@ contract Battleship {
 
         bytes32[] memory buffer = new bytes32[](boardSize * boardSize);
 
+        // first, compute the hashes of the leaves
         for (uint256 i = 0; i < boardSize * boardSize; ++i) {
             buffer[i] = keccak256(abi.encodePacked(board[i]));
         }
 
+        // compute the hashes of the intermediate nodes, they are stored always
+        // in the first part of the buffer
         for (uint256 i = boardSizeLog; i > 0; --i) {
             for (uint256 j = 0; j < (1 << i); j += 2) {
                 buffer[j / 2] = keccak256(
@@ -403,9 +414,12 @@ contract Battleship {
                 );
             }
         }
+
+        // at the end, the root is stored in the first position of the buffer
         return buffer[0];
     }
 
+    // Reveal a value in the board at coordinates (x, y), by providing its corresponding Merkle proof
     function revealValue(
         uint256 gameId,
         uint16 x,
@@ -416,6 +430,7 @@ contract Battleship {
         // check gameId
         require(gameId < games.length, "Game does not exists");
 
+        // resolve any accusation if present
         resolveAccusationIfPresent(gameId);
 
         GameStateStruct memory game = games[gameId];
@@ -426,7 +441,7 @@ contract Battleship {
             "Operation not supported for the current game state"
         );
 
-        // check sender is consistent with phase
+        // check sender is consistent with the current phase
         if (game.gamePhase == GamePhaseEnum.WAITING_PLAYER_1_VALUE) {
             require(
                 msg.sender == game.playerState1.playerAddress,
@@ -439,6 +454,7 @@ contract Battleship {
             );
         }
 
+        // check that the revealed value is the one requested in the current guess
         require(
             x == game.currentGuess.x,
             "x coordinate does not match guessed one"
@@ -448,13 +464,16 @@ contract Battleship {
             "y coordinate does not match guessed one"
         );
 
+        // the actual board value is the last significant byte of the revealed value,
+        // the rest is the nonce.
         uint8 cellValue = uint8(uint256(revealedValue) % 256);
         require(
             cellValue == 1 || cellValue == 0,
             "Board value can be only 0 or 1"
         );
 
-        // check merkle proof
+        // check that the merkle proof is correct, to ensure that the revealed value
+        // is consistent with the board commitment
         bytes32 computedRoot = computeMerkleRootFromProof(
             game.boardSize,
             y * game.boardSize + x,
@@ -462,6 +481,10 @@ contract Battleship {
             merkleProof
         );
 
+        // check that the computed root is the same as the one committed for the revealing player
+        // if it is a hit, increment the number of sunk ships for the player
+        // if the other player has sunk all the ships, declare it as the winner
+        // and go to the board reveal phase
         if (game.gamePhase == GamePhaseEnum.WAITING_PLAYER_1_VALUE) {
             require(
                 computedRoot == game.playerState1.committedBoardRoot,
@@ -498,14 +521,19 @@ contract Battleship {
             }
         }
 
+        // update the game
         games[gameId] = game;
 
+        // emit that the game phase has changed
         emit GamePhaseChanged(gameId);
 
+        // emit also that a value has been revealed
         uint8 playerNumber = getPlayerGameNumber(gameId, msg.sender);
         emit BoardValueRevealed(gameId, x, y, playerNumber, cellValue == 1);
     }
 
+    // Returns the number of occupied cells in a board of the specified size
+    // this is based on a fixed allocation of ships by the game rules
     function getNumberOfOccupiedCells(
         uint16 boardSize
     ) public pure returns (uint16) {
@@ -513,8 +541,6 @@ contract Battleship {
             boardSize == 8 || boardSize == 4,
             "Supported board sizes are 4 and 8"
         );
-        // TODO remove
-        return 1;
 
         if (boardSize == 8) {
             // 5 + 4 + 3 + 3 + 2 = 17
@@ -525,12 +551,14 @@ contract Battleship {
         }
     }
 
+    // Reveal a board by providing the board itself and the ships placement.
+    // The ships items must be in decreasing order of length in order for the
+    // check to pass.
     function revealBoard(
         uint256 gameId,
         bytes32[] calldata board,
         ShipPlacementStruct[] calldata ships
     ) public {
-        // check gameId
         require(gameId < games.length, "Game does not exists");
         GameStateStruct memory game = games[gameId];
 
@@ -539,9 +567,10 @@ contract Battleship {
             "Operation not supported for the current game state"
         );
 
-        // this should never be false
+        // this should never be false if the
         require(game.winner != 0, "No winner has been declared yet");
 
+        // resolve any accusation if present
         resolveAccusationIfPresent(gameId);
 
         // check board size
@@ -550,34 +579,35 @@ contract Battleship {
             "Incorrect board size"
         );
 
-        // check merkle root
+        // check that the ships have been placed legally on the board
+        require(
+            checkShipPlacement(game.boardSize, board, ships),
+            "Incorrect ship placement"
+        );
+
+        // compute the Merkle root from the provided board
         bytes32 computedRoot = computeMerkleRootFromBoard(
             game.boardSize,
             board
         );
 
+        // check that the computed root is the same as the one committed for the revealing player
         if (msg.sender == game.playerState1.playerAddress) {
             require(
                 computedRoot == game.playerState1.committedBoardRoot,
                 "Merkle root is not correct"
             );
-            require(
-                checkShipPlacement(game.boardSize, board, ships),
-                "Incorrect ship placement"
-            );
+
             game.playerState1.boardRevealed = true;
         } else {
             require(
                 computedRoot == game.playerState2.committedBoardRoot,
                 "Merkle root is not correct"
             );
-            require(
-                checkShipPlacement(game.boardSize, board, ships),
-                "Incorrect ship placement"
-            );
             game.playerState2.boardRevealed = true;
         }
 
+        // if both players have revealed their boards, go to the next phase
         if (
             game.playerState1.boardRevealed && game.playerState2.boardRevealed
         ) {
@@ -585,15 +615,19 @@ contract Battleship {
             emit GamePhaseChanged(gameId);
         }
 
+        // update the game
         games[gameId] = game;
     }
 
+    // check that the ships have been placed legally on the board, and that the ships description
+    // is consistent with the provided board. This is implemented by "simulating" the placement of
+    // the ships on the board and checking bounds and that there are no overlapping ships. Then
+    // the provided board is checked to be the same as the one obtained by the "simulation".
     function checkShipPlacement(
         uint16 boardSize,
         bytes32[] calldata board,
         ShipPlacementStruct[] calldata ships
     ) public pure returns (bool) {
-        // check board size
         require(boardSize == 8 || boardSize == 4, "Incorrect board size");
         require(board.length == boardSize * boardSize, "Incorrect board size");
 
@@ -656,7 +690,7 @@ contract Battleship {
             }
         }
 
-        // check that the board is the same
+        // check that the provided board is the same
         for (uint256 i = 0; i < boardSize * boardSize; ++i) {
             bool boardValue = uint8(uint256(board[i]) % 256) == 1;
             if (boardValue && !newBoard[i]) {
@@ -667,8 +701,8 @@ contract Battleship {
         return true;
     }
 
+    // Accuse the other player of being idle
     function accuseIdle(uint256 gameId) public {
-        // check game state
         require(gameId < games.length, "Game does not exists");
         require(
             games[gameId].accuser == address(0),
@@ -705,11 +739,11 @@ contract Battleship {
             );
         }
 
-        // store accusation
+        // store the accusation
         games[gameId].accuser = msg.sender;
         games[gameId].currentAccusationBlockNumber = block.number;
 
-        // emit event
+        // emit the accusation event
         address accusedPlayer;
         if (msg.sender == games[gameId].playerState1.playerAddress) {
             accusedPlayer = games[gameId].playerState2.playerAddress;
@@ -719,8 +753,8 @@ contract Battleship {
         emit IdleAccusation(gameId, accusedPlayer);
     }
 
+    // Resolve an accusation if present, the accusation is simply erased
     function resolveAccusationIfPresent(uint256 gameId) private {
-        // check game state
         require(gameId < games.length, "Game does not exists");
         if (games[gameId].accuser != address(0)) {
             games[gameId].accuser = address(0);
@@ -728,6 +762,8 @@ contract Battleship {
         }
     }
 
+    // Claim the reward for an accusation if the other player has not performed
+    // any action for 5 blocks
     function claimAccusationReward(uint256 gameId) public {
         // check game state
         require(gameId < games.length, "Game does not exists");
@@ -745,6 +781,8 @@ contract Battleship {
         );
 
         if (block.number - games[gameId].currentAccusationBlockNumber > 5) {
+            // avoid reentrancy by setting the game phase to finished before
+            // sending the reward
             games[gameId].gamePhase = GamePhaseEnum.FINISHED;
             games[gameId].winner = getPlayerGameNumber(gameId, msg.sender);
             payable(msg.sender).transfer(
@@ -755,8 +793,8 @@ contract Battleship {
         }
     }
 
+    // Claim the reward for winning a game
     function claimWinningReward(uint256 gameId) public {
-        // check game state
         require(
             games[gameId].gamePhase == GamePhaseEnum.WAITING_WINNINGS_CLAIM,
             "Game is not finished yet"
@@ -765,6 +803,9 @@ contract Battleship {
             games[gameId].winner == getPlayerGameNumber(gameId, msg.sender),
             "You are not the winner of this game"
         );
+
+        // avoid reentrancy by setting the game phase to finished before
+        // sending the reward
         games[gameId].gamePhase = GamePhaseEnum.FINISHED;
         payable(msg.sender).transfer(
             games[gameId].playerState1.committedAmount +
@@ -773,6 +814,21 @@ contract Battleship {
         emit GamePhaseChanged(gameId);
     }
 
+    // Get the ids of all the currently created games
+    function getCreatedGamesIds() public view returns (uint256[] memory) {
+        return createdGames;
+    }
+
+    // Get the addresses of all the owners of the currently created games
+    function getCreatedGamesOwners() public view returns (address[] memory) {
+        address[] memory result = new address[](createdGames.length);
+        for (uint i = 0; i < createdGames.length; ++i) {
+            result[i] = games[createdGames[i]].playerState1.playerAddress;
+        }
+        return result;
+    }
+
+    // Get a string of the current game phase
     function getGamePhase(uint256 gameId) public view returns (string memory) {
         require(gameId < games.length, "Game does not exists");
         GamePhaseEnum gamePhase = games[gameId].gamePhase;
@@ -799,6 +855,7 @@ contract Battleship {
         }
     }
 
+    // get the addresses of the players in the game
     function getGamePlayers(
         uint256 gameId
     ) public view returns (address, address) {
@@ -809,6 +866,7 @@ contract Battleship {
         );
     }
 
+    // get the x and y coordinates of the current guess
     function getCurrentGuess(
         uint256 gameId
     ) public view returns (uint16, uint16) {
@@ -816,17 +874,14 @@ contract Battleship {
         return (games[gameId].currentGuess.x, games[gameId].currentGuess.y);
     }
 
+    // get the board size of the game
     function getBoardSize(uint256 gameId) public view returns (uint16) {
         require(gameId < games.length, "Game does not exists");
         return games[gameId].boardSize;
     }
 
-    /**
-     * Returns the number of the player in the game
-     * @param gameId The id of the game
-     * @param player The address of the player
-     * @return 0 if the player is not in the game, 1 if it is player 1, 2 if it is player 2
-     */
+    //Returns the number of the player in the game
+    // returns 0 if the player is not in the game, 1 if it is player 1, 2 if it is player 2
     function getPlayerGameNumber(
         uint256 gameId,
         address player
@@ -842,6 +897,7 @@ contract Battleship {
         }
     }
 
+    // get the winner of the game, returns 0 if there is no winner yet
     function getWinner(uint256 gameId) public view returns (uint8) {
         require(gameId < games.length, "Game does not exists");
         return games[gameId].winner;

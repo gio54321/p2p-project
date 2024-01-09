@@ -9,6 +9,7 @@ import { toast } from '@zerodevx/svelte-toast'
 import BattleshipContract from '$lib/contracts/Battleship.json';
 import { computeMerkleProof, computeMerkleRoot, generateBoardValue, generateCommitment } from './merkleProofs';
 
+// the board size of the game
 export let boardSize = writable(4);
 
 const allowedShipsMap = {
@@ -48,6 +49,7 @@ const allowedShipsMap = {
     }]
 };
 
+// allowed ships, reactive with the current board size
 export const allowedShips = derived(boardSize, (size) => {
     // @ts-ignore
     return allowedShipsMap[size];
@@ -75,6 +77,7 @@ export enum GameStateEnum {
 
 export let gameState = writable(GameStateEnum.WaitingForPlayer);
 
+// returns a user-friendly description of the game state
 export function getGameStateString(state: GameStateEnum): string {
     switch (state) {
         case GameStateEnum.WaitingForPlayer:
@@ -99,6 +102,7 @@ export function getGameStateString(state: GameStateEnum): string {
 }
 
 
+// call the contract to get the current game phase
 export async function getGamePhase(): Promise<any> {
     if (!get(connected)) {
         return null;
@@ -112,6 +116,8 @@ export async function getGamePhase(): Promise<any> {
     return gameState;
 }
 
+// call the contract to get the current player number
+// that is playing the game
 async function getPlayerNumber(): Promise<any> {
     if (!get(connected)) {
         return null;
@@ -126,6 +132,7 @@ async function getPlayerNumber(): Promise<any> {
     return playerNumber;
 }
 
+// call the contract to get the winner of the current game
 async function getWinner(): Promise<any> {
     if (!get(connected)) {
         return null;
@@ -139,6 +146,8 @@ async function getWinner(): Promise<any> {
     return winner;
 }
 
+// refresh the game state, called when the game phase changed event is received
+// updates the gameState store, as well as the gameWinner store
 export async function refreshGameState() {
     let gamePhase = await getGamePhase();
     console.log(gamePhase);
@@ -176,6 +185,7 @@ export async function refreshGameState() {
     }
 }
 
+// create a ships custom store, that exposes some useful methds for interacting with the ships
 function createShips() {
     let initialShips = Array(get(allowedShips).length).fill(null);
     const { subscribe, update } = writable<(Ship | null)[]>(initialShips);
@@ -183,6 +193,8 @@ function createShips() {
     return {
         subscribe,
         setShip: (id: number, pos: number, isHorizontal: number) => {
+            // set a ship at the given position
+
             if (id < 0 || id >= get(allowedShips).length) {
                 return;
             }
@@ -193,6 +205,8 @@ function createShips() {
             });
         },
         removeShip: (id: number) => {
+            // remove a ship from its id
+
             if (id < 0 || id >= get(allowedShips).length) {
                 return;
             }
@@ -224,6 +238,9 @@ function createShips() {
             });
         },
         toContractStructs: () => {
+            // returns the ships in the format expected by the contract
+            // for a boardReveal call
+
             let ships = get(boardShips);
             let result = [];
             for (let i in ships) {
@@ -251,6 +268,7 @@ function createShips() {
 
 export const boardShips = createShips();
 
+// derived store that computes the actual cell values from the ships representation
 export const boardValues = derived(boardShips, (ships) => {
     let board: (0 | 1)[] = [];
     let size = get(boardSize);
@@ -269,10 +287,9 @@ export const boardValues = derived(boardShips, (ships) => {
     return board;
 });
 
-// export const connected = derived(selectedAccount, ($a) => $a !== undefined);
 export const connected = connected_web3;
 
-// saved in local storage
+// game state variales that are saved in local storage
 export const currentGameId: Writable<null | number> = writable(null);
 export const boardValuesNonces: Writable<string[]> = writable([]);
 export const opponentBoardValues: Writable<(0 | 1 | null)[]> = writable([]);
@@ -287,6 +304,7 @@ export const currentAccusation: Writable<number> = writable(0);
 // null if no winner yet, true if the player won, false if the player lost
 export const gameWinner: Writable<null | boolean> = writable(null);
 
+// load all the game state from local storage
 export function loadGameFromLocalStorage() {
     let utils = get(web3).utils;
     console.log(utils);
@@ -319,6 +337,7 @@ export function loadGameFromLocalStorage() {
     }
 }
 
+// save all the game state to local storage
 export function saveGameToLocalStorage() {
     let currentGameIdValue = get(currentGameId);
     if (currentGameIdValue !== null) {
@@ -338,6 +357,7 @@ export function saveGameToLocalStorage() {
     localStorage.setItem("boardSize", boardSizeValue.toString());
 }
 
+// clear all the game state on local storage
 export function clearLocalStorageAndState() {
     localStorage.removeItem("currentGameId");
     localStorage.removeItem("boardValuesNonces");
@@ -350,13 +370,14 @@ export function clearLocalStorageAndState() {
     boardValuesRevealed.set([]);
     gameReady.set(false);
     gameStarted.set(false);
-    // NOTE: do not clear boardSize and currentGameId
+    // NOTE: this does not clear boardSize and currentGameId
 }
 
 export async function connectProvider() {
     await defaultEvmStores.setProvider();
     toast.push("Successfully connected account");
 }
+
 export async function disconnectProvider() {
     await defaultEvmStores.disconnect();
     toast.push("Account disconnected");
@@ -372,28 +393,33 @@ let lastEvent: any = {
     'IdleAccusation': null,
 };
 
+// subscribe to an event, and save the subscription id in the subscriptions variable
+// the last event hash is saved in the lastEvent variable, to avoid duplicate events, since web3js
+// sometimes sends the same event multiple times
+// see: https://ethereum.stackexchange.com/questions/15402/duplicate-events-firing-in-a-web3-listener
 function subscribeToEvent(contract: any, event: string, callback: (data: any) => void) {
     if (event in subscriptions) {
-        console.log('already subscribed to event', event);
         return;
     }
-    console.log('subscribing to event', event);
     contract.events[event]()
         .on('connected', (subscriptionId: string) => {
             subscriptions[event] = subscriptionId;
         })
     contract.events[event]().on('data', (data: any) => {
-        console.log(event, 'event');
-
         // ensure that the event is not duplicated
         if (lastEvent[event] === data.transactionHash) {
             return;
         }
+
+        // store the last event hash
         lastEvent[event] = data.transactionHash;
+
+        // invoke the callback
         callback(data);
     });
 }
 
+// main contract instance store
 export let battleshipInstance: Readable<any> = derived(connected, (connected) => {
     if (connected) {
         let web3Instance = get(web3);
@@ -406,18 +432,12 @@ export let battleshipInstance: Readable<any> = derived(connected, (connected) =>
 
         let contract = new web3Instance.eth.Contract(BattleshipContract.abi, address);
 
-        console.log('installing event listeners', subscriptions);
-        // install event listeners
-
+        // install event listeners callbacks
         subscribeToEvent(contract, 'GameCreated', (data: any) => {
-            console.log('game created event callback');
-            console.log(data);
-            console.log(get(battleshipInstance));
             refreshCreatedGames();
         });
 
         subscribeToEvent(contract, 'GameStarted', (data: any) => {
-            console.log(data);
             if (data.returnValues.id.toString() === get(currentGameId)?.toString()) {
                 gameStarted.set(true);
             }
@@ -429,12 +449,11 @@ export let battleshipInstance: Readable<any> = derived(connected, (connected) =>
         });
 
         subscribeToEvent(contract, 'BoardValueRevealed', async (data: any) => {
-            console.log('board value revealed event');
-            console.log(data);
             if (data.returnValues.gameId.toString() !== get(currentGameId)?.toString()) {
                 return;
             }
 
+            // upon board reveal, update the UI to reflect the revealed cell for both players
             let playerNumber = await getPlayerNumber();
             let size = get(boardSize);
             if (data.returnValues.playerNumber.toString() === playerNumber.toString()) {
@@ -452,11 +471,7 @@ export let battleshipInstance: Readable<any> = derived(connected, (connected) =>
             saveGameToLocalStorage();
         });
 
-
-
         subscribeToEvent(contract, 'GameReady', (data: any) => {
-            console.log('game ready event');
-            console.log(data);
             refreshCreatedGames();
             if (data.returnValues.id.toString() === get(currentGameId)?.toString()) {
                 gameReady.set(true);
@@ -464,8 +479,8 @@ export let battleshipInstance: Readable<any> = derived(connected, (connected) =>
         });
 
         subscribeToEvent(contract, 'IdleAccusation', (data: any) => {
-            console.log('accuse idle event');
-            console.log(data);
+            // if the current player is accused, set the currentAccusation store to 1,
+            // if the current player is the accuser, set the currentAccusation store to -1
             if (data.returnValues.gameId.toString() === get(currentGameId)?.toString()) {
                 if (data.returnValues.accusedPlayer.toString().toLowerCase() === get(selectedAccount)?.toString().toLowerCase()) {
                     currentAccusation.set(1);
@@ -476,8 +491,6 @@ export let battleshipInstance: Readable<any> = derived(connected, (connected) =>
         });
 
         subscribeToEvent(contract, 'AccusationResolved', (data: any) => {
-            console.log('accusation resolved event');
-            console.log(data);
             if (data.returnValues.gameId.toString() === get(currentGameId)?.toString()) {
                 currentAccusation.set(0);
                 toast.push("Accusation resolved");
@@ -489,6 +502,7 @@ export let battleshipInstance: Readable<any> = derived(connected, (connected) =>
     }
 });
 
+// make a transaction to the contract to create a game, and return the game id
 export async function createGame(boardSize: number): Promise<null | number> {
     if (!get(connected)) {
         return null;
@@ -510,6 +524,7 @@ export async function createGame(boardSize: number): Promise<null | number> {
     return null;
 }
 
+// make a transaction to the contract to join a game by id
 export async function joinGameById(id: any): Promise<any> {
     if (!get(connected)) {
         return null;
@@ -527,6 +542,7 @@ export async function joinGameById(id: any): Promise<any> {
     return null;
 }
 
+// make a transaction to the contract to join a random game, and return the joined game id
 export async function joinRandomGame(): Promise<any> {
     if (!get(connected)) {
         return null;
@@ -544,6 +560,7 @@ export async function joinRandomGame(): Promise<any> {
     return null;
 }
 
+// get the board size of a game by id
 export async function getBoardSize(gameId: any): Promise<any> {
     if (!get(connected)) {
         return null;
@@ -553,6 +570,8 @@ export async function getBoardSize(gameId: any): Promise<any> {
     return boardSize;
 }
 
+// get all the created games from the contract, and return them as an array
+// of objects of the form {id: number, owner: string, boardSize: number}, sorted by id
 export async function getCreatedGames(): Promise<any[]> {
     if (!get(connected)) {
         return [];
@@ -569,12 +588,16 @@ export async function getCreatedGames(): Promise<any[]> {
     return result;
 }
 
+// refresh the created games store by calling the contract
 export async function refreshCreatedGames() {
     let games = await getCreatedGames();
     createdGames.set(games);
 }
 
 
+// make a transaction to the contract to commit the current board values,
+// generates the nonces, the commitments, and the Merkle tree root,
+// returns the transaction object
 export async function commitBoard(commitAmount: any): Promise<any> {
     if (!get(connected)) {
         return null;
@@ -584,17 +607,21 @@ export async function commitBoard(commitAmount: any): Promise<any> {
     if (gameId === null) {
         return null;
     }
+    // generated the 32 bytes values, where the board value is the last significan byte
     let nonces = get(boardValues).map((v: 0 | 1) => generateBoardValue(v));
     boardValuesNonces.set(nonces);
+
+    // compute the Merkle tree root
     let commitments = nonces.map((nonce) => generateCommitment(nonce));
     let root = computeMerkleRoot(commitments);
-    console.log(root);
-    console.log(commitAmount);
-    console.log(gameId);
+
+    // commit the Merkle tree root and the commit amount
     let commitTx = await battleship.methods.commitBoard(gameId, root).send({ from: get(selectedAccount), value: commitAmount });
     return commitTx;
 }
 
+// make a transaction to the contract to guess a cell,
+// returns the transaction object
 export async function guessCell(x: number, y: number): Promise<any> {
     if (!get(connected)) {
         return null;
@@ -608,6 +635,8 @@ export async function guessCell(x: number, y: number): Promise<any> {
     return guessTx;
 }
 
+// make a transaction to the contract to reveal a value,
+// returns the transaction object
 export async function revealValue(): Promise<any> {
     if (!get(connected)) {
         return null;
@@ -620,23 +649,22 @@ export async function revealValue(): Promise<any> {
     let guess = await getCurrentGuess();
     console.log(guess);
 
-    // we can use a number here because the board size is small
+    // we can use a plain js number here because the board size is small
     let x = parseInt(guess[0].toString());
     let y = parseInt(guess[1].toString());
     let index = x + y * get(boardSize);
 
-    console.log(index);
-    console.log(get(boardValuesNonces));
-
-
+    // generate a Merkle proof for the current guess
     let nonce = get(boardValuesNonces)[index];
     let commitments = get(boardValuesNonces).map((x) => generateCommitment(x));
     let proof = computeMerkleProof(commitments, index);
 
+    // make the transaction
     let revealTx = await battleship.methods.revealValue(gameId, x, y, nonce, proof).send({ from: get(selectedAccount) });
     return revealTx;
 }
 
+// make a contract call to get the current guess
 async function getCurrentGuess(): Promise<any> {
     if (!get(connected)) {
         return null;
@@ -650,6 +678,7 @@ async function getCurrentGuess(): Promise<any> {
     return guess;
 }
 
+// make a contract call to check the current placement of the ships
 export async function checkShipPlacement(): Promise<boolean> {
     if (!get(connected)) {
         return false;
@@ -661,6 +690,8 @@ export async function checkShipPlacement(): Promise<boolean> {
     return result;
 }
 
+// make a transaction to reveal the current board,
+// returns the transaction object
 export async function revealBoard(): Promise<any> {
     if (!get(connected)) {
         return null;
@@ -676,6 +707,8 @@ export async function revealBoard(): Promise<any> {
     return revealTx;
 }
 
+// make a transaction to claim the winning reward,
+// returns the transaction object
 export async function claimWinningReward(): Promise<any> {
     if (!get(connected)) {
         return null;
@@ -690,6 +723,8 @@ export async function claimWinningReward(): Promise<any> {
     return claimTx;
 }
 
+// make a transaction to accuse the other player of being idle,
+// returns the transaction object
 export async function accuseIdle(): Promise<any> {
     if (!get(connected)) {
         return null;
@@ -704,6 +739,8 @@ export async function accuseIdle(): Promise<any> {
     return claimTx;
 }
 
+// make a transaction to claim the accusation reward,
+// returns the transaction object
 export async function claimAccusationReward(): Promise<any> {
     if (!get(connected)) {
         return null;
