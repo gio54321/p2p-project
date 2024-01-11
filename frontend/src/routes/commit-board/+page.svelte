@@ -110,9 +110,6 @@
 			toast.push('Invalid commit amount');
 			return;
 		}
-
-		// TODO: check if the board is valid
-
 		commit = commitBoard(commitAmountWei);
 	}
 
